@@ -49,6 +49,7 @@ struct Summary: Decodable {
     let apiSeries: Series
     let hooks: [Stats]
     let tools: [Stats]
+    let subagents: [Stats]
 }
 
 struct LiveEvent: Decodable {
@@ -323,12 +324,7 @@ struct SummaryView: View {
                 // Same threshold the collector uses for the "slow" state.
                 warn: { $0.p95 > 2000 }
             )
-            StatsList(
-                title: "Tools by total time",
-                rows: Array(summary.tools.prefix(3)),
-                value: { fmtMs($0.totalMs) },
-                warn: { _ in false }
-            )
+            TotalTimeList(summary: summary)
             LiveFeed(events: Array(live.filter { $0.kind != "hook_start" }.prefix(6)))
         }
     }
@@ -503,6 +499,63 @@ struct StatsList: View {
                 }
             }
         }
+    }
+}
+
+enum TotalTimeKind: String, CaseIterable {
+    case all, tools, hooks, agents
+
+    var label: String { rawValue.capitalized }
+}
+
+struct TotalTimeList: View {
+    let summary: Summary
+    @AppStorage("totalTimeKind") private var kind = TotalTimeKind.tools
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                SectionTitle("By total time")
+                Spacer()
+                Picker("Kind", selection: $kind) {
+                    ForEach(TotalTimeKind.allCases, id: \.self) { Text($0.label).tag($0) }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .controlSize(.mini)
+                .fixedSize()
+            }
+            if rows.isEmpty {
+                Text("Nothing in this window.").font(.callout).foregroundStyle(.secondary)
+            } else {
+                // A hook and a tool can share a name, so key rows by position.
+                ForEach(Array(rows.enumerated()), id: \.offset) { _, item in
+                    let (symbol, row) = item
+                    HStack(spacing: 6) {
+                        if kind == .all {
+                            Image(systemName: symbol).foregroundStyle(.secondary).frame(width: 16)
+                        }
+                        Text(row.name).lineLimit(1).truncationMode(.middle)
+                        Spacer(minLength: 8)
+                        Text(fmtMs(row.totalMs)).foregroundStyle(.secondary).monospacedDigit()
+                    }
+                    .font(.callout)
+                }
+            }
+        }
+    }
+
+    private var rows: [(String, Stats)] {
+        let hooks = summary.hooks.map { (LiveFeed.symbol("hook"), $0) }
+        let tools = summary.tools.map { (LiveFeed.symbol("tool"), $0) }
+        let agents = summary.subagents.map { (LiveFeed.symbol("agent"), $0) }
+        let picked: [(String, Stats)] = switch kind {
+        case .all: (hooks + tools + agents).sorted { $0.1.totalMs > $1.1.totalMs }
+        case .tools: tools
+        case .hooks: hooks
+        case .agents: agents
+        }
+        return Array(picked.prefix(3))
     }
 }
 
