@@ -58,6 +58,7 @@ struct LiveEvent: Decodable {
     let label: String
     let ms: Double?
     let ok: Bool
+    let sessionId: String?
 }
 
 func fmtMs(_ ms: Double) -> String {
@@ -76,14 +77,21 @@ func panelAnimation() -> Animation? {
     NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? nil : .smooth(duration: 0.35)
 }
 
-// Stable ForEach ids from keys that may repeat: the second "a" becomes "a#1".
-func uniqueIds(_ keys: [String]) -> [String] {
+// A ForEach id for a key that may repeat. A struct, so no key can mimic another's suffix.
+struct RowID: Hashable {
+    let key: String
+    let occurrence: Int
+}
+
+// Repeats are counted from the end (the oldest event in a newest-first list),
+// so a new event at the top never shifts the ids of the rows below it.
+func rowIds(_ keys: [String]) -> [RowID] {
     var seen: [String: Int] = [:]
-    return keys.map { key in
+    return keys.reversed().map { key in
         let n = seen[key, default: 0]
         seen[key] = n + 1
-        return n == 0 ? key : "\(key)#\(n)"
-    }
+        return RowID(key: key, occurrence: n)
+    }.reversed()
 }
 
 // MARK: - Model
@@ -116,25 +124,33 @@ final class Telemetry {
         return URLSession(configuration: config)
     }()
     @ObservationIgnored private var panelTask: Task<Void, Never>?
+    @ObservationIgnored private var statusTask: Task<Void, Never>?
 
     init() {
-        // Status runs on its own loop so slow summary requests never delay the label.
-        Task {
-            while true {
+        restartStatusPolling()
+    }
+
+    // Skips the 2s wait after a failure.
+    func retry() {
+        restartStatusPolling()
+        restartPanelPolling()
+    }
+
+    // Status runs on its own loop so slow summary requests never delay the label.
+    // Restarting cancels the old loop, so its late response cannot undo a newer one.
+    private func restartStatusPolling() {
+        statusTask?.cancel()
+        statusTask = Task {
+            while !Task.isCancelled {
                 await refreshStatus()
                 try? await Task.sleep(for: .seconds(2))
             }
         }
     }
 
-    // Skips the 2s wait after a failure.
-    func retry() {
-        Task { await refreshStatus() }
-        restartPanelPolling()
-    }
-
     private func refreshStatus() async {
         let newStatus: Status? = try? await get("api/status")
+        guard !Task.isCancelled else { return }
         withAnimation(panelAnimation()) { status = newStatus }
     }
 
@@ -220,11 +236,11 @@ struct PanelView: View {
             VStack(alignment: .leading, spacing: 3) {
                 Text("Claude Code").font(.headline)
                 HStack(spacing: 5) {
-                    // Pulses only while sessions are active, so a calm panel stays still.
+                    // Pulses only while events are arriving, so a calm panel stays still.
                     Image(systemName: "circle.fill")
                         .font(.system(size: 7))
                         .foregroundStyle(stateColor)
-                        .symbolEffect(.pulse, isActive: model.status?.state == "ok")
+                        .symbolEffect(.pulse, isActive: recentlyActive)
                     Text(stateText).contentTransition(.opacity)
                     if let updatedAt = model.updatedAt, model.status != nil {
                         Text("· updated \(Text(updatedAt, style: .relative)) ago")
@@ -248,6 +264,12 @@ struct PanelView: View {
             .labelsHidden()
             .fixedSize()
         }
+    }
+
+    // "ok" covers any API request in the last 15 minutes, which is too long to call live.
+    private var recentlyActive: Bool {
+        guard model.status != nil, let newest = model.live.first else { return false }
+        return Date.now.timeIntervalSince1970 * 1000 - newest.tsMs < 60_000
     }
 
     private var stateColor: Color {
@@ -383,7 +405,7 @@ extension Summary {
 }
 
 extension LiveEvent {
-    static let placeholders = (0..<6).map { LiveEvent(tsMs: Double($0), kind: "", label: "placeholder event", ms: 1, ok: true) }
+    static let placeholders = (0..<6).map { LiveEvent(tsMs: Double($0), kind: "", label: "placeholder event", ms: 1, ok: true, sessionId: nil) }
 }
 
 // Soft highlight under the hovered row, the same feedback native lists give.
@@ -446,7 +468,7 @@ struct SummaryView: View {
                 metric: \.totalMs,
                 value: { fmtMs($0.totalMs) }
             )
-            LiveFeed(events: Array(live.filter { $0.kind != "hook_start" }.prefix(6)))
+            LiveFeed(events: live.filter { $0.kind != "hook_start" })
         }
     }
 }
@@ -701,7 +723,7 @@ struct KindStatsList: View {
                     Text("Nothing in this window.").font(.callout).foregroundStyle(.secondary)
                 }
                 // A hook and a tool can share a name, so the kind is part of the key.
-                let ids = uniqueIds(rows.map { "\($0.0.rawValue)/\($0.1.name)" })
+                let ids = rowIds(rows.map { "\($0.0.rawValue)/\($0.1.name)" })
                 ForEach(Array(zip(ids, rows)), id: \.0) { _, item in
                     let (rowKind, row) = item
                     HStack(spacing: 6) {
@@ -745,14 +767,15 @@ struct KindStatsList: View {
 }
 
 struct LiveFeed: View {
+    // The whole feed, newest first. Ids are counted over all of it, then only the top rows show.
     let events: [LiveEvent]
 
     var body: some View {
         if !events.isEmpty {
             VStack(alignment: .leading, spacing: 4) {
                 SectionTitle("Live")
-                let ids = uniqueIds(events.map { "\($0.tsMs)/\($0.kind)/\($0.label)" })
-                ForEach(Array(zip(ids, events)), id: \.0) { _, e in
+                let ids = rowIds(events.map { "\($0.tsMs)/\($0.sessionId ?? "")/\($0.kind)/\($0.label)" })
+                ForEach(Array(zip(ids, events).prefix(6)), id: \.0) { _, e in
                     HStack(spacing: 6) {
                         Text(date(e.tsMs), format: .dateTime.hour().minute().second())
                             .foregroundStyle(.tertiary)
