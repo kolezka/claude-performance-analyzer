@@ -317,14 +317,24 @@ struct SummaryView: View {
             }
             LatencyChart(points: summary.apiSeries.points)
             Breakdown(breakdown: summary.breakdown)
-            StatsList(
-                title: "Slowest hooks",
-                rows: Array(summary.hooks.sorted { $0.p95 > $1.p95 }.prefix(3)),
+            KindStatsList(
+                title: "Slowest",
+                summary: summary,
+                storageKey: "slowestKind",
+                defaultKind: .hooks,
+                metric: \.p95,
                 value: { "p95 \(fmtMs($0.p95))" },
-                // Same threshold the collector uses for the "slow" state.
-                warn: { $0.p95 > 2000 }
+                // Same threshold the collector uses for the "slow" state, which only watches hooks.
+                warn: { kind, row in kind == .hooks && row.p95 > 2000 }
             )
-            TotalTimeList(summary: summary)
+            KindStatsList(
+                title: "By total time",
+                summary: summary,
+                storageKey: "totalTimeKind",
+                defaultKind: .tools,
+                metric: \.totalMs,
+                value: { fmtMs($0.totalMs) }
+            )
             LiveFeed(events: Array(live.filter { $0.kind != "hook_start" }.prefix(6)))
         }
     }
@@ -476,49 +486,54 @@ struct Breakdown: View {
     }
 }
 
-struct StatsList: View {
-    let title: String
-    let rows: [Stats]
-    let value: (Stats) -> String
-    let warn: (Stats) -> Bool
+enum StatsKind: String, CaseIterable {
+    case all, tools, hooks, agents
 
-    var body: some View {
-        if !rows.isEmpty {
-            VStack(alignment: .leading, spacing: 4) {
-                SectionTitle(title)
-                ForEach(rows, id: \.name) { row in
-                    HStack(spacing: 6) {
-                        Text(row.name).lineLimit(1).truncationMode(.middle)
-                        Spacer(minLength: 8)
-                        if warn(row) {
-                            Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
-                        }
-                        Text(value(row)).foregroundStyle(.secondary).monospacedDigit()
-                    }
-                    .font(.callout)
-                }
-            }
+    var label: String { rawValue.capitalized }
+
+    var symbol: String {
+        switch self {
+        case .all: "circle"
+        case .tools: LiveFeed.symbol("tool")
+        case .hooks: LiveFeed.symbol("hook")
+        case .agents: LiveFeed.symbol("agent")
         }
     }
 }
 
-enum TotalTimeKind: String, CaseIterable {
-    case all, tools, hooks, agents
-
-    var label: String { rawValue.capitalized }
-}
-
-struct TotalTimeList: View {
+// Top 3 hooks, tools or agents by one metric, with a picker for which kind to show.
+struct KindStatsList: View {
+    let title: String
     let summary: Summary
-    @AppStorage("totalTimeKind") private var kind = TotalTimeKind.tools
+    let metric: (Stats) -> Double
+    let value: (Stats) -> String
+    let warn: (StatsKind, Stats) -> Bool
+    @AppStorage private var kind: StatsKind
+
+    init(
+        title: String,
+        summary: Summary,
+        storageKey: String,
+        defaultKind: StatsKind,
+        metric: @escaping (Stats) -> Double,
+        value: @escaping (Stats) -> String,
+        warn: @escaping (StatsKind, Stats) -> Bool = { _, _ in false }
+    ) {
+        self.title = title
+        self.summary = summary
+        self.metric = metric
+        self.value = value
+        self.warn = warn
+        _kind = AppStorage(wrappedValue: defaultKind, storageKey)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
-                SectionTitle("By total time")
+                SectionTitle(title)
                 Spacer()
                 Picker("Kind", selection: $kind) {
-                    ForEach(TotalTimeKind.allCases, id: \.self) { Text($0.label).tag($0) }
+                    ForEach(StatsKind.allCases, id: \.self) { Text($0.label).tag($0) }
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
@@ -530,14 +545,17 @@ struct TotalTimeList: View {
             } else {
                 // A hook and a tool can share a name, so key rows by position.
                 ForEach(Array(rows.enumerated()), id: \.offset) { _, item in
-                    let (symbol, row) = item
+                    let (rowKind, row) = item
                     HStack(spacing: 6) {
                         if kind == .all {
-                            Image(systemName: symbol).foregroundStyle(.secondary).frame(width: 16)
+                            Image(systemName: rowKind.symbol).foregroundStyle(.secondary).frame(width: 16)
                         }
                         Text(row.name).lineLimit(1).truncationMode(.middle)
                         Spacer(minLength: 8)
-                        Text(fmtMs(row.totalMs)).foregroundStyle(.secondary).monospacedDigit()
+                        if warn(rowKind, row) {
+                            Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+                        }
+                        Text(value(row)).foregroundStyle(.secondary).monospacedDigit()
                     }
                     .font(.callout)
                 }
@@ -545,17 +563,17 @@ struct TotalTimeList: View {
         }
     }
 
-    private var rows: [(String, Stats)] {
-        let hooks = summary.hooks.map { (LiveFeed.symbol("hook"), $0) }
-        let tools = summary.tools.map { (LiveFeed.symbol("tool"), $0) }
-        let agents = summary.subagents.map { (LiveFeed.symbol("agent"), $0) }
-        let picked: [(String, Stats)] = switch kind {
-        case .all: (hooks + tools + agents).sorted { $0.1.totalMs > $1.1.totalMs }
+    private var rows: [(StatsKind, Stats)] {
+        let hooks = summary.hooks.map { (StatsKind.hooks, $0) }
+        let tools = summary.tools.map { (StatsKind.tools, $0) }
+        let agents = summary.subagents.map { (StatsKind.agents, $0) }
+        let picked: [(StatsKind, Stats)] = switch kind {
+        case .all: hooks + tools + agents
         case .tools: tools
         case .hooks: hooks
         case .agents: agents
         }
-        return Array(picked.prefix(3))
+        return Array(picked.sorted { metric($0.1) > metric($1.1) }.prefix(3))
     }
 }
 
