@@ -705,9 +705,8 @@ struct KindStatsList: View {
                 ForEach(Array(zip(ids, rows)), id: \.0) { _, item in
                     let (rowKind, row) = item
                     HStack(spacing: 6) {
-                        if kind == .all {
-                            Image(systemName: rowKind.symbol).foregroundStyle(.secondary).frame(width: 16)
-                        }
+                        // Shown for every kind, so rows keep their alignment when the picker changes.
+                        Image(systemName: rowKind.symbol).foregroundStyle(.secondary).frame(width: 16)
                         Text(row.name).lineLimit(1).truncationMode(.middle)
                         Spacer(minLength: 8)
                         if warn(rowKind, row) {
