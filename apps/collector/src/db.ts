@@ -10,6 +10,7 @@ export function openStore(path: string) {
     ts_ms INTEGER NOT NULL, name TEXT NOT NULL, session_id TEXT, prompt_id TEXT, attrs TEXT NOT NULL)`);
   db.run("CREATE INDEX IF NOT EXISTS events_ts ON events (ts_ms)");
   db.run("CREATE INDEX IF NOT EXISTS events_prompt ON events (prompt_id, ts_ms)");
+  db.run("CREATE INDEX IF NOT EXISTS events_session ON events (session_id, ts_ms)");
   db.run(`CREATE TABLE IF NOT EXISTS spans (
     trace_id TEXT, span_id TEXT, parent_id TEXT, name TEXT NOT NULL,
     start_ms INTEGER NOT NULL, end_ms INTEGER NOT NULL, session_id TEXT, attrs TEXT NOT NULL)`);
@@ -33,6 +34,16 @@ export function openStore(path: string) {
     for (const r of rows) insMetric.run(r.tsMs, r.name, r.sessionId, r.value, JSON.stringify(r.attrs));
   });
 
+  const eventRow = (r: any): EventRow => ({
+    id: r.id,
+    tsMs: r.ts_ms,
+    name: r.name,
+    sessionId: r.session_id,
+    promptId: r.prompt_id,
+    attrs: JSON.parse(r.attrs),
+  });
+  const EVENT_COLUMNS = "rowid AS id, ts_ms, name, session_id, prompt_id, attrs";
+
   return {
     db,
     addEvents,
@@ -40,15 +51,17 @@ export function openStore(path: string) {
     addMetrics,
     events(sinceMs: number): EventRow[] {
       return db
-        .query("SELECT ts_ms, name, session_id, prompt_id, attrs FROM events WHERE ts_ms >= ? ORDER BY ts_ms")
+        .query(`SELECT ${EVENT_COLUMNS} FROM events WHERE ts_ms >= ? ORDER BY ts_ms`)
         .all(sinceMs)
-        .map((r: any) => ({
-          tsMs: r.ts_ms,
-          name: r.name,
-          sessionId: r.session_id,
-          promptId: r.prompt_id,
-          attrs: JSON.parse(r.attrs),
-        }));
+        .map(eventRow);
+    },
+    // Same as events(), but filtered by event name in SQL so callers that only want one kind
+    // (e.g. /api/item wants just tool_result rows) never load or parse the rest.
+    eventsByName(sinceMs: number, name: string): EventRow[] {
+      return db
+        .query(`SELECT ${EVENT_COLUMNS} FROM events WHERE ts_ms >= ? AND name = ? ORDER BY ts_ms`)
+        .all(sinceMs, name)
+        .map(eventRow);
     },
     // Most recent prompt when no id is given.
     promptEvents(promptId: string | null): EventRow[] {
@@ -57,9 +70,29 @@ export function openStore(path: string) {
         (db.query("SELECT prompt_id FROM events WHERE prompt_id IS NOT NULL ORDER BY ts_ms DESC LIMIT 1").get() as any)?.prompt_id;
       if (!id) return [];
       return db
-        .query("SELECT ts_ms, name, session_id, prompt_id, attrs FROM events WHERE prompt_id = ? ORDER BY ts_ms")
+        .query(`SELECT ${EVENT_COLUMNS} FROM events WHERE prompt_id = ? ORDER BY ts_ms`)
         .all(id)
-        .map((r: any) => ({ tsMs: r.ts_ms, name: r.name, sessionId: r.session_id, promptId: r.prompt_id, attrs: JSON.parse(r.attrs) }));
+        .map(eventRow);
+    },
+    event(id: number): EventRow | null {
+      const r = db.query(`SELECT ${EVENT_COLUMNS} FROM events WHERE rowid = ?`).get(id) as any;
+      return r ? eventRow(r) : null;
+    },
+    sessionEvents(sessionId: string): EventRow[] {
+      return db
+        .query(`SELECT ${EVENT_COLUMNS} FROM events WHERE session_id = ? ORDER BY ts_ms`)
+        .all(sessionId)
+        .map(eventRow);
+    },
+    // sessionEvents() restricted to the event names the caller actually needs, so a session
+    // with a lot of hook/skill/mcp noise does not drag all of it in just to read 3 fields.
+    sessionEventsByNames(sessionId: string, names: string[]): EventRow[] {
+      if (names.length === 0) return [];
+      const placeholders = names.map(() => "?").join(",");
+      return db
+        .query(`SELECT ${EVENT_COLUMNS} FROM events WHERE session_id = ? AND name IN (${placeholders}) ORDER BY ts_ms`)
+        .all(sessionId, ...names)
+        .map(eventRow);
     },
     spans(sinceMs: number): SpanRow[] {
       return db

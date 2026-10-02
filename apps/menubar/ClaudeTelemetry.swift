@@ -59,6 +59,80 @@ struct LiveEvent: Decodable {
     let ms: Double?
     let ok: Bool
     let sessionId: String?
+    // Present only when the collector can resolve a detail record for this event.
+    let id: Int?
+}
+
+// MARK: - Detail payloads (api/event and api/item)
+
+struct EventDetail: Decodable {
+    struct Detail: Decodable {
+        let key: String
+        let value: String
+    }
+
+    let id: Int
+    let tsMs: Double
+    let name: String
+    let kind: String
+    let label: String
+    let ms: Double?
+    let ok: Bool
+    let sessionId: String?
+    let promptId: String?
+    let details: [Detail]
+    let session: SessionInfo?
+}
+
+struct SessionInfo: Decodable {
+    struct Repo: Decodable {
+        let name: String
+        let root: String
+        let worktree: String?
+    }
+
+    let sessionId: String
+    let repo: Repo?
+    let pathsSeen: Int
+    let otherRepos: [String]
+    let branch: String?
+    let terminal: String?
+    let claudeVersion: String?
+    let models: [String]
+    let firstMs: Double
+    let lastMs: Double
+    let prompts: Int
+    let costUsd: Double
+}
+
+struct ItemDetail: Decodable {
+    struct Repo: Decodable {
+        let name: String?
+        let root: String?
+        let count: Int
+        let totalMs: Double
+        let p95: Double
+    }
+    struct Recent: Decodable {
+        let id: Int
+        let tsMs: Double
+        let ms: Double?
+        let ok: Bool
+        let sessionId: String?
+        let repo: String?
+        let detail: String?
+    }
+
+    let kind: String
+    let name: String
+    let count: Int
+    let failures: Int
+    let totalMs: Double
+    let p50: Double
+    let p95: Double
+    let maxMs: Double
+    let repos: [Repo]
+    let recent: [Recent]
 }
 
 func fmtMs(_ ms: Double) -> String {
@@ -69,6 +143,18 @@ func fmtMs(_ ms: Double) -> String {
 
 func date(_ ms: Double) -> Date {
     Date(timeIntervalSince1970: ms / 1000)
+}
+
+// Shortens a home-rooted path for display, the way Terminal and Finder do.
+func abbreviateHome(_ path: String) -> String {
+    let home = NSHomeDirectory()
+    if path.hasPrefix(home) { return "~" + path.dropFirst(home.count) }
+    return path
+}
+
+func copyToPasteboard(_ string: String) {
+    NSPasteboard.general.clearContents()
+    NSPasteboard.general.setString(string, forType: .string)
 }
 
 // One motion curve for the whole panel, or none when the user turned on Reduce Motion.
@@ -193,6 +279,21 @@ final class Telemetry {
         }
         return try JSONDecoder().decode(T.self, from: data)
     }
+
+    func fetchEvent(id: Int) async throws -> EventDetail {
+        try await get("api/event?id=\(id)")
+    }
+
+    func fetchItem(kind: StatsKind, name: String) async throws -> ItemDetail {
+        var components = URLComponents()
+        components.path = "api/item"
+        components.queryItems = [
+            URLQueryItem(name: "kind", value: kind.rawValue),
+            URLQueryItem(name: "name", value: name),
+            URLQueryItem(name: "minutes", value: String(minutes)),
+        ]
+        return try await get(components.string!)
+    }
 }
 
 // MARK: - Menu bar label
@@ -217,6 +318,9 @@ struct MenuBarLabel: View {
 
 struct PanelView: View {
     @Bindable var model: Telemetry
+    // Overlay navigation stack: empty closes it, one entry shows a detail, two lets "back" return
+    // from a recent call's event detail to the aggregate that opened it.
+    @State private var detailStack: [DetailRoute] = []
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -226,9 +330,14 @@ struct PanelView: View {
             footer
         }
         .padding(14)
+        // An overlay takes the panel's size, so the card gets a fixed height to scroll in.
+        .overlay { DetailOverlay(model: model, stack: $detailStack) }
         .frame(width: 360)
         .onAppear { model.panelOpen = true }
-        .onDisappear { model.panelOpen = false }
+        .onDisappear {
+            model.panelOpen = false
+            detailStack = []
+        }
     }
 
     private var header: some View {
@@ -309,8 +418,17 @@ struct PanelView: View {
                     )
                     .id("empty")
                 } else {
-                    SummaryView(summary: s, live: model.live)
-                        .id("summary")
+                    SummaryView(
+                        summary: s,
+                        live: model.live,
+                        onSelectItem: { kind, name in
+                            withAnimation(panelAnimation()) { detailStack = [.item(kind: kind, name: name)] }
+                        },
+                        onSelectEvent: { id in
+                            withAnimation(panelAnimation()) { detailStack = [.event(id: id)] }
+                        }
+                    )
+                    .id("summary")
                 }
             } else if let error = model.summaryError {
                 EmptyState(
@@ -405,7 +523,7 @@ extension Summary {
 }
 
 extension LiveEvent {
-    static let placeholders = (0..<6).map { LiveEvent(tsMs: Double($0), kind: "", label: "placeholder event", ms: 1, ok: true, sessionId: nil) }
+    static let placeholders = (0..<6).map { LiveEvent(tsMs: Double($0), kind: "", label: "placeholder event", ms: 1, ok: true, sessionId: nil, id: nil) }
 }
 
 // Soft highlight under the hovered row, the same feedback native lists give.
@@ -431,6 +549,8 @@ extension View {
 struct SummaryView: View {
     let summary: Summary
     let live: [LiveEvent]
+    var onSelectItem: (StatsKind, String) -> Void = { _, _ in }
+    var onSelectEvent: (Int) -> Void = { _ in }
 
     var body: some View {
         let k = summary.kpis
@@ -458,7 +578,8 @@ struct SummaryView: View {
                 metric: \.p95,
                 value: { "p95 \(fmtMs($0.p95))" },
                 // Same threshold the collector uses for the "slow" state, which only watches hooks.
-                warn: { kind, row in kind == .hooks && row.p95 > 2000 }
+                warn: { kind, row in kind == .hooks && row.p95 > 2000 },
+                onSelect: onSelectItem
             )
             KindStatsList(
                 title: "By total time",
@@ -466,9 +587,10 @@ struct SummaryView: View {
                 storageKey: "totalTimeKind",
                 defaultKind: .tools,
                 metric: \.totalMs,
-                value: { fmtMs($0.totalMs) }
+                value: { fmtMs($0.totalMs) },
+                onSelect: onSelectItem
             )
-            LiveFeed(events: live.filter { $0.kind != "hook_start" })
+            LiveFeed(events: live.filter { $0.kind != "hook_start" }, onSelect: onSelectEvent)
         }
     }
 }
@@ -686,6 +808,7 @@ struct KindStatsList: View {
     let metric: (Stats) -> Double
     let value: (Stats) -> String
     let warn: (StatsKind, Stats) -> Bool
+    let onSelect: (StatsKind, String) -> Void
     @AppStorage private var kind: StatsKind
 
     init(
@@ -695,13 +818,15 @@ struct KindStatsList: View {
         defaultKind: StatsKind,
         metric: @escaping (Stats) -> Double,
         value: @escaping (Stats) -> String,
-        warn: @escaping (StatsKind, Stats) -> Bool = { _, _ in false }
+        warn: @escaping (StatsKind, Stats) -> Bool = { _, _ in false },
+        onSelect: @escaping (StatsKind, String) -> Void = { _, _ in }
     ) {
         self.title = title
         self.summary = summary
         self.metric = metric
         self.value = value
         self.warn = warn
+        self.onSelect = onSelect
         _kind = AppStorage(wrappedValue: defaultKind, storageKey)
     }
 
@@ -726,21 +851,28 @@ struct KindStatsList: View {
                 let ids = rowIds(rows.map { "\($0.0.rawValue)/\($0.1.name)" })
                 ForEach(Array(zip(ids, rows)), id: \.0) { _, item in
                     let (rowKind, row) = item
-                    HStack(spacing: 6) {
-                        // Shown for every kind, so rows keep their alignment when the picker changes.
-                        Image(systemName: rowKind.symbol).foregroundStyle(.secondary).frame(width: 16)
-                        Text(row.name).lineLimit(1).truncationMode(.middle)
-                        Spacer(minLength: 8)
-                        if warn(rowKind, row) {
-                            Image(systemName: "exclamationmark.triangle.fill")
-                                .foregroundStyle(.orange)
-                                .transition(.scale.combined(with: .opacity))
+                    Button { onSelect(rowKind, row.name) } label: {
+                        HStack(spacing: 6) {
+                            // Shown for every kind, so rows keep their alignment when the picker changes.
+                            Image(systemName: rowKind.symbol).foregroundStyle(.secondary).frame(width: 16)
+                            Text(row.name).lineLimit(1).truncationMode(.middle)
+                            Spacer(minLength: 8)
+                            if warn(rowKind, row) {
+                                Image(systemName: "exclamationmark.triangle.fill")
+                                    .foregroundStyle(.orange)
+                                    .transition(.scale.combined(with: .opacity))
+                            }
+                            Text(value(row))
+                                .foregroundStyle(.secondary)
+                                .monospacedDigit()
+                                .contentTransition(.numericText())
+                            Image(systemName: "chevron.right")
+                                .font(.caption2)
+                                .foregroundStyle(.tertiary)
                         }
-                        Text(value(row))
-                            .foregroundStyle(.secondary)
-                            .monospacedDigit()
-                            .contentTransition(.numericText())
+                        .contentShape(.rect)
                     }
+                    .buttonStyle(.plain)
                     .font(.callout)
                     .hoverRow()
                     .help(row.name)
@@ -768,6 +900,7 @@ struct KindStatsList: View {
 struct LiveFeed: View {
     // The whole feed, newest first. Ids are counted over all of it, then only the top rows show.
     let events: [LiveEvent]
+    var onSelect: (Int) -> Void = { _ in }
 
     var body: some View {
         if !events.isEmpty {
@@ -775,28 +908,45 @@ struct LiveFeed: View {
                 SectionTitle("Live")
                 let ids = rowIds(events.map { "\($0.tsMs)/\($0.sessionId ?? "")/\($0.kind)/\($0.label)" })
                 ForEach(Array(zip(ids, events).prefix(6)), id: \.0) { _, e in
-                    HStack(spacing: 6) {
-                        Text(date(e.tsMs), format: .dateTime.hour().minute().second())
-                            .foregroundStyle(.tertiary)
-                        Image(systemName: Self.symbol(e.kind))
-                            .foregroundStyle(e.ok ? Color.secondary : Color.red)
-                            .frame(width: 16)
-                        Text(e.label).lineLimit(1).truncationMode(.middle)
-                        Spacer(minLength: 8)
-                        if let ms = e.ms {
-                            Text(fmtMs(ms)).foregroundStyle(.secondary)
-                        }
-                    }
-                    .font(.callout)
-                    .monospacedDigit()
-                    .hoverRow()
-                    .help(e.label)
-                    // New events push in from the top; the oldest fades out at the bottom.
-                    .transition(.asymmetric(insertion: .move(edge: .top).combined(with: .opacity), removal: .opacity))
+                    row(e)
                 }
             }
             .clipped()
         }
+    }
+
+    @ViewBuilder
+    private func row(_ e: LiveEvent) -> some View {
+        let label = HStack(spacing: 6) {
+            Text(date(e.tsMs), format: .dateTime.hour().minute().second())
+                .foregroundStyle(.tertiary)
+            Image(systemName: Self.symbol(e.kind))
+                .foregroundStyle(e.ok ? Color.secondary : Color.red)
+                .frame(width: 16)
+            Text(e.label).lineLimit(1).truncationMode(.middle)
+            Spacer(minLength: 8)
+            if let ms = e.ms {
+                Text(fmtMs(ms)).foregroundStyle(.secondary)
+            }
+            if e.id != nil {
+                Image(systemName: "chevron.right").font(.caption2).foregroundStyle(.tertiary)
+            }
+        }
+        .font(.callout)
+        .monospacedDigit()
+
+        Group {
+            if let id = e.id {
+                Button { onSelect(id) } label: { label.contentShape(.rect) }
+                    .buttonStyle(.plain)
+            } else {
+                label
+            }
+        }
+        .hoverRow()
+        .help(e.label)
+        // New events push in from the top; the oldest fades out at the bottom.
+        .transition(.asymmetric(insertion: .move(edge: .top).combined(with: .opacity), removal: .opacity))
     }
 
     static func symbol(_ kind: String) -> String {
@@ -811,6 +961,439 @@ struct LiveFeed: View {
         case "error": "xmark.octagon"
         case "compaction": "arrow.down.right.and.arrow.up.left"
         default: "circle"
+        }
+    }
+}
+
+// MARK: - Detail overlay
+
+// Where the overlay is pointed: a single event, or an aggregate row for one kind+name.
+enum DetailRoute {
+    case event(id: Int)
+    case item(kind: StatsKind, name: String)
+}
+
+// Dimmed backdrop plus a card, replacing the panel content in place. Not a .sheet or NSWindow:
+// either of those closes or misbehaves inside a MenuBarExtra panel.
+struct DetailOverlay: View {
+    @Bindable var model: Telemetry
+    @Binding var stack: [DetailRoute]
+
+    var body: some View {
+        if let route = stack.last {
+            ZStack {
+                Rectangle()
+                    .fill(.black.opacity(0.35))
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .onTapGesture(perform: close)
+
+                DetailCard(model: model, route: route, canGoBack: stack.count > 1, onBack: back, onClose: close, onPush: push)
+                    .padding(14)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+            .transition(.opacity)
+            .onExitCommand(perform: close)
+        }
+    }
+
+    private func close() { withAnimation(panelAnimation()) { stack = [] } }
+    private func back() { withAnimation(panelAnimation()) { if !stack.isEmpty { stack.removeLast() } } }
+    private func push(_ route: DetailRoute) { withAnimation(panelAnimation()) { stack.append(route) } }
+}
+
+struct DetailCard: View {
+    @Bindable var model: Telemetry
+    let route: DetailRoute
+    let canGoBack: Bool
+    let onBack: () -> Void
+    let onClose: () -> Void
+    let onPush: (DetailRoute) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            toolbar
+            ScrollView {
+                routeContent.frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10))
+        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(.separator))
+    }
+
+    private var toolbar: some View {
+        HStack {
+            if canGoBack {
+                Button(action: onBack) {
+                    Image(systemName: "chevron.left")
+                }
+                .buttonStyle(.plain)
+                .help("Back")
+            }
+            Spacer()
+            Button(action: onClose) {
+                Image(systemName: "xmark.circle.fill")
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.secondary)
+            .help("Close (Esc)")
+        }
+    }
+
+    @ViewBuilder private var routeContent: some View {
+        switch route {
+        case .event(let id):
+            EventDetailView(model: model, id: id)
+        case .item(let kind, let name):
+            ItemDetailView(model: model, kind: kind, name: name, onPush: onPush)
+        }
+    }
+}
+
+// Ok/failed pill, shared by both detail views.
+struct OkBadge: View {
+    let ok: Bool
+
+    var body: some View {
+        Text(ok ? "OK" : "Failed")
+            .font(.caption2.weight(.semibold))
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(ok ? Color.green.opacity(0.15) : Color.red.opacity(0.15), in: .capsule)
+            .foregroundStyle(ok ? Color.green : Color.red)
+    }
+}
+
+struct StatCell: View {
+    let title: String
+    let value: String
+    var warn = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 1) {
+            Text(title).font(.caption2).foregroundStyle(.secondary)
+            Text(value)
+                .font(.callout.weight(.medium))
+                .monospacedDigit()
+                .foregroundStyle(warn ? Color.orange : Color.primary)
+        }
+    }
+}
+
+struct DetailSkeleton: View {
+    var body: some View {
+        ProgressView()
+            .frame(maxWidth: .infinity, minHeight: 120)
+    }
+}
+
+struct EventDetailView: View {
+    @Bindable var model: Telemetry
+    let id: Int
+
+    @State private var detail: EventDetail?
+    @State private var loadError: String?
+    @State private var isLoading = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            if let detail {
+                header(detail)
+                repositorySection(detail.session)
+                if !detail.details.isEmpty { detailsSection(detail.details) }
+                if let session = detail.session { sessionSection(session) }
+            } else if let loadError {
+                EmptyState(
+                    title: "Couldn't load event",
+                    symbol: "exclamationmark.triangle",
+                    message: "\(loadError)",
+                    retry: { Task { await load() } }
+                )
+            } else {
+                DetailSkeleton()
+            }
+            refreshBar
+        }
+        .task(id: id) { await load() }
+    }
+
+    private var refreshBar: some View {
+        HStack {
+            Spacer()
+            if isLoading { ProgressView().controlSize(.small) }
+            Button("Refresh", systemImage: "arrow.clockwise") { Task { await load() } }
+                .controlSize(.small)
+                .disabled(isLoading)
+        }
+    }
+
+    private func header(_ d: EventDetail) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: LiveFeed.symbol(d.kind))
+                .foregroundStyle(d.ok ? Color.secondary : Color.red)
+                .frame(width: 18)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(d.label).font(.headline)
+                HStack(spacing: 4) {
+                    Text(date(d.tsMs), format: .dateTime.month().day().hour().minute().second())
+                    if let ms = d.ms { Text("· \(fmtMs(ms))") }
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .monospacedDigit()
+            }
+            Spacer()
+            OkBadge(ok: d.ok)
+        }
+    }
+
+    private func repositorySection(_ session: SessionInfo?) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            SectionTitle("Repository")
+            if let repo = session?.repo {
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "folder").foregroundStyle(.secondary)
+                        Text(repo.name).font(.callout.weight(.medium))
+                    }
+                    let path = repo.worktree ?? repo.root
+                    Text(abbreviateHome(path))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                        .lineLimit(2)
+                        .help(path)
+                    if let branch = session?.branch {
+                        Label(branch, systemImage: "arrow.triangle.branch")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    if let session {
+                        Text("Inferred from \(session.pathsSeen) path\(session.pathsSeen == 1 ? "" : "s").")
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                        if !session.otherRepos.isEmpty {
+                            Text("Also seen: \(session.otherRepos.joined(separator: ", "))")
+                                .font(.caption2)
+                                .foregroundStyle(.tertiary)
+                        }
+                    }
+                }
+            } else {
+                Text("Unknown repository").font(.callout.weight(.medium))
+                Text("No file paths seen in this session yet.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private func detailsSection(_ details: [EventDetail.Detail]) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            SectionTitle("Details")
+            ForEach(details, id: \.key) { d in
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(d.key).font(.caption).foregroundStyle(.secondary)
+                    Text(d.value)
+                        .font(.callout)
+                        .textSelection(.enabled)
+                        .lineLimit(4)
+                        .help(d.value)
+                }
+            }
+        }
+    }
+
+    private func sessionSection(_ session: SessionInfo) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            SectionTitle("Session")
+            HStack(spacing: 6) {
+                Text(String(session.sessionId.prefix(8)))
+                    .font(.callout)
+                    .monospaced()
+                    .help(session.sessionId)
+                Button { copyToPasteboard(session.sessionId) } label: {
+                    Image(systemName: "doc.on.doc")
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+                .help("Copy session id")
+            }
+            if let terminal = session.terminal {
+                Label(terminal, systemImage: "terminal").font(.caption).foregroundStyle(.secondary)
+            }
+            if let version = session.claudeVersion {
+                Text("Claude Code \(version)").font(.caption).foregroundStyle(.secondary)
+            }
+            if !session.models.isEmpty {
+                Text(session.models.joined(separator: ", ")).font(.caption).foregroundStyle(.secondary)
+            }
+            Text("\(session.prompts) prompts · \(session.costUsd, format: .currency(code: "USD"))")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .monospacedDigit()
+            Text("\(date(session.firstMs), format: .dateTime.hour().minute()) to \(date(session.lastMs), format: .dateTime.hour().minute())")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+                .monospacedDigit()
+        }
+    }
+
+    private func load() async {
+        isLoading = true
+        defer { isLoading = false }
+        do {
+            let d = try await model.fetchEvent(id: id)
+            guard !Task.isCancelled else { return }
+            detail = d
+            loadError = nil
+        } catch {
+            guard !Task.isCancelled else { return }
+            loadError = error.localizedDescription
+        }
+    }
+}
+
+struct ItemDetailView: View {
+    @Bindable var model: Telemetry
+    let kind: StatsKind
+    let name: String
+    let onPush: (DetailRoute) -> Void
+
+    @State private var detail: ItemDetail?
+    @State private var loadError: String?
+    @State private var isLoading = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            header
+            if let detail {
+                statGrid(detail)
+                repoSection(detail)
+                recentSection(detail)
+            } else if let loadError {
+                EmptyState(
+                    title: "Couldn't load",
+                    symbol: "exclamationmark.triangle",
+                    message: "\(loadError)",
+                    retry: { Task { await load() } }
+                )
+            } else {
+                DetailSkeleton()
+            }
+            refreshBar
+        }
+        .task(id: "\(kind.rawValue)/\(name)") { await load() }
+    }
+
+    private var header: some View {
+        HStack(spacing: 8) {
+            Image(systemName: kind.symbol).foregroundStyle(.secondary).frame(width: 18)
+            Text(name).font(.headline).lineLimit(1).truncationMode(.middle)
+            Spacer()
+            Text(kind.label).font(.caption).foregroundStyle(.secondary)
+        }
+    }
+
+    private var refreshBar: some View {
+        HStack {
+            Spacer()
+            if isLoading { ProgressView().controlSize(.small) }
+            Button("Refresh", systemImage: "arrow.clockwise") { Task { await load() } }
+                .controlSize(.small)
+                .disabled(isLoading)
+        }
+    }
+
+    private func statGrid(_ d: ItemDetail) -> some View {
+        let columns = Array(repeating: GridItem(.flexible(), alignment: .leading), count: 3)
+        return LazyVGrid(columns: columns, alignment: .leading, spacing: 8) {
+            StatCell(title: "Count", value: "\(d.count)")
+            StatCell(title: "Failures", value: "\(d.failures)", warn: d.failures > 0)
+            StatCell(title: "Total", value: fmtMs(d.totalMs))
+            StatCell(title: "p50", value: fmtMs(d.p50))
+            StatCell(title: "p95", value: fmtMs(d.p95))
+            StatCell(title: "Max", value: fmtMs(d.maxMs))
+        }
+    }
+
+    private func repoSection(_ d: ItemDetail) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            SectionTitle("By repository")
+            if d.repos.isEmpty {
+                Text("No repository data.").font(.callout).foregroundStyle(.secondary)
+            } else {
+                let maxTotal = max(d.repos.map(\.totalMs).max() ?? 1, 1)
+                ForEach(Array(d.repos.enumerated()), id: \.offset) { _, repo in
+                    VStack(alignment: .leading, spacing: 2) {
+                        HStack {
+                            Text(repo.name ?? "Unknown").lineLimit(1).truncationMode(.middle)
+                            Spacer(minLength: 8)
+                            Text("\(repo.count) · \(fmtMs(repo.totalMs)) · p95 \(fmtMs(repo.p95))")
+                                .foregroundStyle(.secondary)
+                        }
+                        .font(.caption)
+                        .monospacedDigit()
+                        GeometryReader { geo in
+                            RoundedRectangle(cornerRadius: 2)
+                                .fill(Color.blue.opacity(0.5))
+                                .frame(width: geo.size.width * (repo.totalMs / maxTotal))
+                        }
+                        .frame(height: 4)
+                    }
+                    .help(repo.root ?? "Unknown repository")
+                }
+            }
+        }
+    }
+
+    private func recentSection(_ d: ItemDetail) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            SectionTitle("Recent calls")
+            if d.recent.isEmpty {
+                Text("No recent calls.").font(.callout).foregroundStyle(.secondary)
+            } else {
+                ForEach(d.recent, id: \.id) { call in
+                    Button { onPush(.event(id: call.id)) } label: {
+                        HStack(spacing: 6) {
+                            Text(date(call.tsMs), format: .dateTime.hour().minute().second())
+                                .foregroundStyle(.tertiary)
+                            if !call.ok {
+                                Image(systemName: "xmark.octagon").foregroundStyle(.red)
+                            }
+                            Text(call.repo ?? "unknown").foregroundStyle(.secondary).lineLimit(1)
+                            Spacer(minLength: 8)
+                            if let detail = call.detail {
+                                Text(detail).lineLimit(1).truncationMode(.middle).foregroundStyle(.secondary)
+                            }
+                            if let ms = call.ms {
+                                Text(fmtMs(ms)).foregroundStyle(.secondary)
+                            }
+                        }
+                        .font(.callout)
+                        .monospacedDigit()
+                        .contentShape(.rect)
+                    }
+                    .buttonStyle(.plain)
+                    .hoverRow()
+                    .help(call.detail ?? "")
+                }
+            }
+        }
+    }
+
+    private func load() async {
+        isLoading = true
+        defer { isLoading = false }
+        do {
+            let d = try await model.fetchItem(kind: kind, name: name)
+            guard !Task.isCancelled else { return }
+            detail = d
+            loadError = nil
+        } catch {
+            guard !Task.isCancelled else { return }
+            loadError = error.localizedDescription
         }
     }
 }

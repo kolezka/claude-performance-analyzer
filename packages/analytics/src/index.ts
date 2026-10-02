@@ -84,6 +84,85 @@ export function toolLabel(attrs: Attrs): string {
   return tool;
 }
 
+// Undoes JSON string escaping (\" -> ", \\ -> \, ...) for a value pulled out by regexField.
+function unescapeJson(s: string): string {
+  return s.replace(/\\(.)/g, (_, c) => {
+    switch (c) {
+      case "n":
+        return "\n";
+      case "t":
+        return "\t";
+      case "r":
+        return "\r";
+      default:
+        return c;
+    }
+  });
+}
+
+// Pulls one string field out of possibly-truncated JSON text ('…[N chars]' tails break JSON.parse).
+// The `(?:\\.|[^"\\])*` alternation treats an escaped quote (\") as part of the value, not its end.
+function regexField(json: string, key: string): string | undefined {
+  const m = json.match(new RegExp(`"${key}"\\s*:\\s*"((?:\\\\.|[^"\\\\])*)"`));
+  return m ? unescapeJson(m[1]!) : undefined;
+}
+
+function fieldFrom(raw: string, parsed: Attrs | null, key: string): string | undefined {
+  const v = parsed ? parsed[key] : regexField(raw, key);
+  return typeof v === "string" ? v : undefined;
+}
+
+function tryParseJson(v: unknown): Attrs | null {
+  if (typeof v !== "string") return null;
+  try {
+    return JSON.parse(v);
+  } catch {
+    return null;
+  }
+}
+
+function expandHome(path: string, home: string): string {
+  if (path === "~") return home;
+  if (path.startsWith("~/")) return home + path.slice(1);
+  return path;
+}
+
+// `cd <path>` at the start of a command, and any `git -C <path>` further in it. An unquoted
+// path stops at shell punctuation (; | & )) rather than swallowing the rest of the command.
+function pathsFromCommand(cmd: string): string[] {
+  const out: string[] = [];
+  const cd = cmd.match(/^\s*cd\s+(?:"([^"]+)"|'([^']+)'|([^\s;|&)]+))/);
+  if (cd) out.push((cd[1] ?? cd[2] ?? cd[3])!);
+  for (const m of cmd.matchAll(/git\s+-C\s+(?:"([^"]+)"|'([^']+)'|([^\s;|&)]+))/g)) out.push((m[1] ?? m[2] ?? m[3])!);
+  return out;
+}
+
+const PATH_KEYS = ["file_path", "notebook_path", "path"] as const;
+const COMMAND_KEYS = ["full_command", "command"] as const;
+
+// Absolute paths a tool call touched: file/notebook/path fields, plus `cd` and `git -C` targets
+// inside command strings. Used to infer which repo a session worked in.
+export function extractPaths(attrs: Attrs, home: string): string[] {
+  const out = new Set<string>();
+  const add = (raw: string | undefined) => {
+    if (!raw) return;
+    const p = expandHome(raw, home);
+    if (p.startsWith("/")) out.add(p);
+  };
+
+  for (const field of ["tool_input", "tool_parameters"] as const) {
+    const raw = attrs[field];
+    if (typeof raw !== "string") continue;
+    const parsed = tryParseJson(raw);
+    for (const key of PATH_KEYS) add(fieldFrom(raw, parsed, key));
+    for (const key of COMMAND_KEYS) {
+      const cmd = fieldFrom(raw, parsed, key);
+      if (cmd) for (const p of pathsFromCommand(cmd)) add(p);
+    }
+  }
+  return [...out];
+}
+
 export interface PromptBreakdown {
   promptId: string;
   startMs: number;
@@ -184,7 +263,7 @@ export function summarize(events: EventRow[], spans: SpanRow[], windowMs: number
       case "hook_execution_complete": {
         const ms = num(a.total_duration_ms);
         const failed = num(a.num_non_blocking_error) > 0;
-        const g = hooks.get(String(a.hook_name ?? a.hook_event ?? "unknown"));
+        const g = hooks.get(hookLabel(a));
         g.add(ms, failed);
         g.bump("hooks", num(a.num_hooks));
         g.bump("blocking", num(a.num_blocking));
@@ -196,7 +275,7 @@ export function summarize(events: EventRow[], spans: SpanRow[], windowMs: number
         skills.get(String(a["skill.name"] ?? "unknown")).bump("activations");
         break;
       case "subagent_completed": {
-        const g = subagents.get(String(a.agent_type ?? "unknown"));
+        const g = subagents.get(agentLabel(a));
         g.add(num(a.duration_ms));
         g.bump("toolUses", num(a.total_tool_uses));
         break;
@@ -276,6 +355,12 @@ export function summarize(events: EventRow[], spans: SpanRow[], windowMs: number
 
 export type Summary = ReturnType<typeof summarize>;
 
+export function fmtBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
+
 export function fmtMs(ms: number): string {
   if (ms < 1000) return `${Math.round(ms)}ms`;
   if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`;
@@ -298,6 +383,7 @@ export function status(s: Summary) {
 }
 
 export interface LiveEvent {
+  id: number | null;
   tsMs: number;
   kind: "prompt" | "api" | "tool" | "hook" | "hook_start" | "agent" | "skill" | "mcp" | "error" | "compaction";
   label: string;
@@ -306,10 +392,20 @@ export interface LiveEvent {
   sessionId: string | null;
 }
 
+// Group key for a hook event, shared by summarize() and the item-detail endpoint.
+export function hookLabel(attrs: Attrs): string {
+  return String(attrs.hook_name ?? attrs.hook_event ?? "unknown");
+}
+
+// Group key for an agent event, shared by summarize() and the item-detail endpoint.
+export function agentLabel(attrs: Attrs): string {
+  return String(attrs.agent_type ?? "unknown");
+}
+
 // One feed row per event worth watching live. Startup noise (plugin/hook registration) is dropped.
 export function liveEvent(e: EventRow): LiveEvent | null {
   const a = e.attrs;
-  const base = { tsMs: e.tsMs, sessionId: e.sessionId, ok: true, ms: null as number | null };
+  const base = { id: e.id ?? null, tsMs: e.tsMs, sessionId: e.sessionId, ok: true, ms: null as number | null };
   switch (e.name) {
     case "user_prompt":
       return { ...base, kind: "prompt", label: a.command_name ? `/${a.command_name}` : `prompt, ${num(a.prompt_length)} chars` };
@@ -320,11 +416,11 @@ export function liveEvent(e: EventRow): LiveEvent | null {
     case "tool_result":
       return { ...base, kind: "tool", label: toolLabel(a), ms: num(a.duration_ms), ok: !isFalse(a.success) };
     case "hook_execution_start":
-      return { ...base, kind: "hook_start", label: String(a.hook_name ?? a.hook_event ?? "hook") };
+      return { ...base, kind: "hook_start", label: hookLabel(a) };
     case "hook_execution_complete":
-      return { ...base, kind: "hook", label: String(a.hook_name ?? a.hook_event ?? "hook"), ms: num(a.total_duration_ms), ok: num(a.num_non_blocking_error) === 0 };
+      return { ...base, kind: "hook", label: hookLabel(a), ms: num(a.total_duration_ms), ok: num(a.num_non_blocking_error) === 0 };
     case "subagent_completed":
-      return { ...base, kind: "agent", label: `agent ${a.agent_type ?? "?"}`, ms: num(a.duration_ms) };
+      return { ...base, kind: "agent", label: `agent ${agentLabel(a)}`, ms: num(a.duration_ms) };
     case "skill_activated":
       return { ...base, kind: "skill", label: `skill ${a["skill.name"] ?? "?"}` };
     case "mcp_server_connection":
@@ -335,6 +431,109 @@ export function liveEvent(e: EventRow): LiveEvent | null {
     default:
       return null;
   }
+}
+
+export interface EventDetail {
+  key: string;
+  value: string;
+}
+
+function detail(key: string, value: unknown): EventDetail | null {
+  if (value === null || value === undefined) return null;
+  const s = String(value);
+  if (s === "") return null;
+  return { key, value: s.length > 2000 ? s.slice(0, 2000) : s };
+}
+
+// Ordered, human-labelled fields for the detail modal. Never surfaces prompt text.
+export function eventDetails(e: EventRow): EventDetail[] {
+  const a = e.attrs;
+  const out: EventDetail[] = [];
+  const push = (key: string, value: unknown) => {
+    const d = detail(key, value);
+    if (d) out.push(d);
+  };
+  switch (e.name) {
+    case "tool_result": {
+      const params = parseJson(a.tool_parameters);
+      const input = parseJson(a.tool_input);
+      push("Tool", toolLabel(a));
+      push("Command or File", params.full_command ?? params.command ?? input.command ?? input.file_path ?? input.notebook_path ?? input.path);
+      push("Description", params.description ?? input.description);
+      push("Success", a.success !== undefined ? String(!isFalse(a.success)) : undefined);
+      push("Input size", a.tool_input_size_bytes !== undefined ? fmtBytes(num(a.tool_input_size_bytes)) : undefined);
+      push("Result size", a.tool_result_size_bytes !== undefined ? fmtBytes(num(a.tool_result_size_bytes)) : undefined);
+      push("Branch", params.git_branch ?? a["vcs.ref.head.name"]);
+      break;
+    }
+    case "hook_execution_complete": {
+      push("Hook", hookLabel(a));
+      push("Event", a.hook_event);
+      push("Matcher", a.hook_matcher);
+      push("Hooks run", a.num_hooks);
+      push("Succeeded", a.num_non_blocking_error !== undefined ? String(num(a.num_non_blocking_error) === 0) : undefined);
+      push("Blocking", a.num_blocking);
+      push("Errors", a.num_non_blocking_error);
+      break;
+    }
+    case "api_request": {
+      push("Model", a.model);
+      push("Input tokens", a.input_tokens);
+      push("Output tokens", a.output_tokens);
+      push("Cache read", a.cache_read_tokens);
+      push("Cost", a.cost_usd !== undefined ? `$${num(a.cost_usd).toFixed(4)}` : undefined);
+      push("TTFT", a.ttft_ms !== undefined ? fmtMs(num(a.ttft_ms)) : undefined);
+      break;
+    }
+    case "subagent_completed": {
+      push("Agent type", agentLabel(a));
+      push("Tool uses", a.total_tool_uses);
+      push("Tokens", a.total_tokens);
+      break;
+    }
+  }
+  return out;
+}
+
+export type ItemKind = "tools" | "hooks" | "agents";
+
+export const ITEM_EVENT_NAMES: Record<ItemKind, string> = {
+  tools: "tool_result",
+  hooks: "hook_execution_complete",
+  agents: "subagent_completed",
+};
+
+// Group key for an item row, matching how summarize() buckets the same event.
+export function itemKey(kind: ItemKind, attrs: Attrs): string {
+  if (kind === "tools") return toolLabel(attrs);
+  if (kind === "hooks") return hookLabel(attrs);
+  return agentLabel(attrs);
+}
+
+export function itemDurationMs(kind: ItemKind, attrs: Attrs): number {
+  return num(kind === "hooks" ? attrs.total_duration_ms : attrs.duration_ms);
+}
+
+export function itemFailed(kind: ItemKind, attrs: Attrs): boolean {
+  if (kind === "tools") return isFalse(attrs.success);
+  if (kind === "hooks") return num(attrs.num_non_blocking_error) > 0;
+  return false;
+}
+
+// Short human text for an item's recent-calls list: command/file for tools, matcher for hooks,
+// a one-line summary for agents.
+export function itemRecentDetail(kind: ItemKind, attrs: Attrs): string | null {
+  if (kind === "tools") {
+    const params = parseJson(attrs.tool_parameters);
+    const input = parseJson(attrs.tool_input);
+    const v = params.full_command ?? params.command ?? input.command ?? input.file_path ?? input.notebook_path ?? input.path;
+    return v ? String(v) : null;
+  }
+  if (kind === "hooks") {
+    const v = attrs.hook_matcher ?? attrs.hook_event;
+    return v ? String(v) : null;
+  }
+  return attrs.total_tool_uses !== undefined ? `${num(attrs.total_tool_uses)} tool uses` : null;
 }
 
 export interface TurnSpan {
