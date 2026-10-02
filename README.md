@@ -1,29 +1,57 @@
-# claude-performance-analyzer
+# Claude Performance Analyzer
 
-macOS menu bar widget for Claude Code telemetry. Shows where turn time goes: model latency, tools, hooks, skills, subagents, MCP startup.
+A macOS menu bar widget that shows where your Claude Code turns spend their time: model latency, tools, hooks, skills, subagents and MCP startup. The data comes from Claude Code's own OpenTelemetry export. It is received and stored on your machine.
 
-## Layout
+<p align="center">
+  <img src="docs/screenshots/menubar-panel.png" alt="Menu bar panel with API latency, turn time split, slowest hooks, tools and live feed" width="360">
+</p>
 
-Bun workspaces. Each package has its own `src/` and `test/`.
+## Menu bar widget
 
-- `apps/collector`: Bun OTLP receiver (http/json or http/protobuf, gzip ok) on `127.0.0.1:4318`, stores to `~/.claude-telemetry/telemetry.sqlite` (14 day retention), serves the dashboard and `/api/summary`, `/api/status`.
-- `apps/dashboard`: browser UI, bundled by the collector through its HTML import.
-- `apps/menubar`: SwiftUI menu bar app. Label is API p50 latency over the last 15 min, with a warning icon when hooks are slow. Click opens a native summary panel (latency chart, turn time split, slowest hooks and tools, live feed); "Open Dashboard" opens the full web dashboard.
-- `packages/otlp`: OTLP http/json and http/protobuf decoding into rows.
-- `packages/analytics`: summaries, percentiles, turn timelines. Shared by the collector and the dashboard.
-- `packages/claude-settings`: adds the telemetry variables to Claude Code's `settings.json`.
+<img src="docs/screenshots/menubar-label.png" alt="Menu bar label showing API p50 latency" width="64" align="left">
 
-## Run
+The label shows API p50 latency over the last 15 minutes. When hooks are slow, the gauge changes to a warning triangle. Hooks count as slow when they take more than 15% of in-turn time, or when one hook has a p95 above 2s.
+<br clear="left">
+
+Click the label to open a native SwiftUI panel:
+
+- **Window picker:** 15m, 1h, 24h or 7d.
+- **Headline numbers:** API p50 and p95, time to first token, turn duration, cost, cache hit rate and session count.
+- **API latency:** p50 and p95 over time (Swift Charts).
+- **Where turn time goes:** the split between API, tools and hooks.
+- **Slowest hooks** by p95. A hook over 2s is flagged.
+- **Tools by total time.**
+- **Live:** the latest hook, tool and model events as they arrive.
+- **Open Dashboard** opens the full web dashboard in your browser.
+
+The label refreshes every 2 seconds. The panel polls only while it is open.
+
+## How it works
+
+```
+Claude Code ──OTLP──▶ collector (127.0.0.1:4318) ──▶ SQLite
+                               │
+                               ├── /api/status, /api/summary, /api/live ──▶ menu bar widget
+                               └── web dashboard
+```
+
+The collector listens on localhost only and keeps 14 days of data.
+
+## Requirements
+
+- macOS 14 or later
+- [Bun](https://bun.sh)
+- Xcode Command Line Tools (`xcode-select --install`) to build the widget with `swiftc`
+
+## Quick start
 
 ```bash
 bun install
-bun run start      # collector + dashboard
-bun run app        # build and open the menu bar app
-bun test           # all packages
-bun run typecheck
+bun run start      # collector + dashboard on http://127.0.0.1:4318
+bun run app        # build and open the menu bar widget
 ```
 
-Point Claude Code at the collector. The dashboard has a button that adds any missing variables to the `env` block of `~/.claude/settings.json` (existing values are kept, a backup is written next to the file). Or set them yourself:
+Then point Claude Code at the collector. The dashboard has a button that adds any missing variables to the `env` block of `~/.claude/settings.json`. Existing values are kept, and a backup is written next to the file. Or set them yourself:
 
 ```bash
 CLAUDE_CODE_ENABLE_TELEMETRY=1
@@ -37,12 +65,35 @@ CLAUDE_CODE_ENHANCED_TELEMETRY_BETA=1   # optional: time to first token, turn sp
 OTEL_TRACES_EXPORTER=otlp
 ```
 
+Only sessions started after this point are recorded.
+
+## Project layout
+
+Bun workspaces. Each package has its own `src/` and `test/`.
+
+| Path | What it does |
+| --- | --- |
+| `apps/collector` | Bun OTLP receiver (http/json or http/protobuf, gzip ok) on `127.0.0.1:4318`. Stores to `~/.claude-telemetry/telemetry.sqlite` with 14 day retention. Serves the dashboard and the JSON API. |
+| `apps/dashboard` | Svelte web dashboard, bundled by the collector through its HTML import. |
+| `apps/menubar` | SwiftUI menu bar widget (`MenuBarExtra`), built with `swiftc` into a universal (arm64 + x86_64) `.app`. |
+| `packages/otlp` | Decodes OTLP http/json and http/protobuf into rows. |
+| `packages/analytics` | Summaries, percentiles, turn timelines. Shared by the collector and the dashboard. |
+| `packages/claude-settings` | Adds the telemetry variables to Claude Code's `settings.json`. |
+
+## Development
+
+```bash
+bun run dev        # collector in development mode
+bun test           # all packages
+bun run typecheck
+```
+
 ## Limits
 
-- Only data from sessions started after telemetry is on. No backfill.
+- Only sessions started after telemetry is turned on are recorded. There is no backfill.
 - Rules have no timing in telemetry. They only appear as `source: config` permission decisions.
 - Hook timing is per hook event and matcher (`PreToolUse:Bash`), not per script. Per-script detail needs detailed beta tracing.
-- "Where turn time goes" sums component durations; parallel tool calls overlap.
+- "Where turn time goes" adds up component durations, so parallel tool calls overlap.
 
 ## Third-party files
 
