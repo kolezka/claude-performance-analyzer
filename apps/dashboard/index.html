@@ -7,20 +7,7 @@
     <link rel="stylesheet" href="./src/style.css" />
   </head>
   <body>
-    <header>
-      <h1>Claude Code speed</h1>
-      <nav id="window" role="tablist">
-        <button data-min="15">15m</button>
-        <button data-min="60">1h</button>
-        <button data-min="1440">24h</button>
-        <button data-min="10080">7d</button>
-      </nav>
-      <span id="updated" class="muted"></span>
-    </header>
-    <section id="setup" class="card" hidden></section>
-    <section id="live" class="card" aria-live="polite"></section>
-    <main id="app"><p class="muted">Loading...</p></main>
-    <div id="tip" role="tooltip"></div>
-    <script type="module" src="./src/app.ts"></script>
+    <div id="root"></div>
+    <script type="module" src="./src/main.ts"></script>
   </body>
 </html>

@@ -10,6 +10,7 @@
     "@cpa/analytics": "workspace:*",
     "@cpa/claude-settings": "workspace:*",
     "@cpa/dashboard": "workspace:*",
-    "@cpa/otlp": "workspace:*"
+    "@cpa/otlp": "workspace:*",
+    "bun-plugin-svelte": "^0.0.6"
   }
 }
