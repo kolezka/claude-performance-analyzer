@@ -3,6 +3,8 @@
 export type Attrs = Record<string, unknown>;
 
 export interface EventRow {
+  // SQLite rowid once stored; absent for rows not yet read back from the store.
+  id?: number;
   tsMs: number;
   name: string;
   sessionId: string | null;
