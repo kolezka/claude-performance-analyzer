@@ -1,7 +1,14 @@
 {
   "name": "@cpa/dashboard",
-  "type": "module",
+  "dependencies": {
+    "@cpa/analytics": "workspace:*",
+    "@cpa/claude-settings": "workspace:*",
+    "echarts": "^6.1.0",
+    "svelte": "^5.57.1"
+  },
+  "exports": {
+    "./index.html": "./index.html"
+  },
   "private": true,
-  "exports": { "./index.html": "./index.html" },
-  "dependencies": { "@cpa/analytics": "workspace:*", "@cpa/claude-settings": "workspace:*", "echarts": "^6.1.0" }
+  "type": "module"
 }
