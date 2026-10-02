@@ -70,6 +70,22 @@ func date(_ ms: Double) -> Date {
     Date(timeIntervalSince1970: ms / 1000)
 }
 
+// One motion curve for the whole panel, or none when the user turned on Reduce Motion.
+@MainActor
+func panelAnimation() -> Animation? {
+    NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? nil : .smooth(duration: 0.35)
+}
+
+// Stable ForEach ids from keys that may repeat: the second "a" becomes "a#1".
+func uniqueIds(_ keys: [String]) -> [String] {
+    var seen: [String: Int] = [:]
+    return keys.map { key in
+        let n = seen[key, default: 0]
+        seen[key] = n + 1
+        return n == 0 ? key : "\(key)#\(n)"
+    }
+}
+
 // MARK: - Model
 
 // Polls the status label all the time, and the summary and live feed only while the panel is open.
@@ -105,10 +121,21 @@ final class Telemetry {
         // Status runs on its own loop so slow summary requests never delay the label.
         Task {
             while true {
-                status = try? await get("api/status")
+                await refreshStatus()
                 try? await Task.sleep(for: .seconds(2))
             }
         }
+    }
+
+    // Skips the 2s wait after a failure.
+    func retry() {
+        Task { await refreshStatus() }
+        restartPanelPolling()
+    }
+
+    private func refreshStatus() async {
+        let newStatus: Status? = try? await get("api/status")
+        withAnimation(panelAnimation()) { status = newStatus }
     }
 
     // One panel loop at a time: closing the panel or switching window cancels the old one,
@@ -130,13 +157,16 @@ final class Telemetry {
             let newSummary: Summary = try await get("api/summary?minutes=\(minutes)")
             let newLive: [LiveEvent]? = try? await get("api/live")
             guard !Task.isCancelled else { return }
-            summary = newSummary
-            summaryError = nil
-            live = newLive ?? live
+            // Animating here lets numbers roll, rows slide and charts morph on every refresh.
+            withAnimation(panelAnimation()) {
+                summary = newSummary
+                summaryError = nil
+                live = newLive ?? live
+            }
             updatedAt = .now
         } catch {
             guard !Task.isCancelled else { return }
-            summaryError = error.localizedDescription
+            withAnimation(panelAnimation()) { summaryError = error.localizedDescription }
         }
     }
 
@@ -159,6 +189,8 @@ struct MenuBarLabel: View {
         let slow = status?.state == "slow"
         HStack(spacing: 3) {
             Image(systemName: slow ? "exclamationmark.triangle.fill" : "gauge.with.dots.needle.67percent")
+                .contentTransition(.symbolEffect(.replace))
+                .symbolEffect(.bounce, value: slow)
             Text(status?.label ?? "off").monospacedDigit()
         }
         .accessibilityLabel("Claude Code telemetry")
@@ -188,8 +220,12 @@ struct PanelView: View {
             VStack(alignment: .leading, spacing: 3) {
                 Text("Claude Code").font(.headline)
                 HStack(spacing: 5) {
-                    Circle().fill(stateColor).frame(width: 7, height: 7)
-                    Text(stateText)
+                    // Pulses only while sessions are active, so a calm panel stays still.
+                    Image(systemName: "circle.fill")
+                        .font(.system(size: 7))
+                        .foregroundStyle(stateColor)
+                        .symbolEffect(.pulse, isActive: model.status?.state == "ok")
+                    Text(stateText).contentTransition(.opacity)
                     if let updatedAt = model.updatedAt, model.status != nil {
                         Text("· updated \(Text(updatedAt, style: .relative)) ago")
                     }
@@ -233,31 +269,40 @@ struct PanelView: View {
     }
 
     @ViewBuilder private var content: some View {
-        if model.status == nil {
-            EmptyState(
-                title: "Collector not running",
-                symbol: "bolt.horizontal.circle",
-                message: "Start it with `bun run start`."
-            )
-        } else if let s = model.summary {
-            if s.eventCount == 0 {
+        Group {
+            if model.status == nil {
                 EmptyState(
-                    title: "No telemetry yet",
-                    symbol: "antenna.radiowaves.left.and.right",
-                    message: "Nothing in this window. Enable telemetry for Claude Code from the dashboard."
+                    title: "Collector not running",
+                    symbol: "bolt.horizontal.circle",
+                    message: "Start it with `bun run start`.",
+                    retry: model.retry
                 )
+                .id("offline")
+            } else if let s = model.summary {
+                if s.eventCount == 0 {
+                    EmptyState(
+                        title: "No telemetry yet",
+                        symbol: "antenna.radiowaves.left.and.right",
+                        message: "Nothing in this window. Enable telemetry for Claude Code from the dashboard."
+                    )
+                    .id("empty")
+                } else {
+                    SummaryView(summary: s, live: model.live)
+                        .id("summary")
+                }
+            } else if let error = model.summaryError {
+                EmptyState(
+                    title: "Couldn't load summary",
+                    symbol: "exclamationmark.triangle",
+                    message: "\(error) Retrying every 2s.",
+                    retry: model.retry
+                )
+                .id("error")
             } else {
-                SummaryView(summary: s, live: model.live)
+                SkeletonView().id("loading")
             }
-        } else if let error = model.summaryError {
-            EmptyState(
-                title: "Couldn't load summary",
-                symbol: "exclamationmark.triangle",
-                message: "\(error) Retrying every 2s."
-            )
-        } else {
-            ProgressView().controlSize(.small).frame(maxWidth: .infinity, minHeight: 80)
         }
+        .transition(.opacity)
     }
 
     private var footer: some View {
@@ -265,6 +310,8 @@ struct PanelView: View {
             Button("Open Dashboard", systemImage: "arrow.up.right.square") {
                 NSWorkspace.shared.open(collectorURL)
             }
+            .keyboardShortcut("d")
+            .help("Open the dashboard in your browser (⌘D)")
             Spacer()
             Button("Quit") { NSApp.terminate(nil) }
                 .keyboardShortcut("q")
@@ -279,21 +326,84 @@ struct EmptyState: View {
     let title: String
     let symbol: String
     let message: LocalizedStringKey
+    var retry: (() -> Void)?
 
     var body: some View {
         VStack(spacing: 6) {
             Image(systemName: symbol)
                 .font(.system(size: 28))
                 .foregroundStyle(.secondary)
+                .symbolEffect(.bounce, value: title)
             Text(title).font(.headline)
             Text(message)
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
+            if let retry {
+                Button("Retry Now", systemImage: "arrow.clockwise", action: retry)
+                    .controlSize(.small)
+                    .padding(.top, 4)
+            }
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 16)
     }
+}
+
+// Same layout as the loaded panel with placeholder bars, so the panel does not jump when data lands.
+struct SkeletonView: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        SummaryView(summary: .placeholder, live: LiveEvent.placeholders)
+            .redacted(reason: .placeholder)
+            .allowsHitTesting(false)
+            .phaseAnimator(reduceMotion ? [1.0] : [1.0, 0.45]) { view, opacity in
+                view.opacity(opacity)
+            } animation: { _ in .easeInOut(duration: 0.8) }
+            .accessibilityLabel("Loading summary")
+    }
+}
+
+extension Summary {
+    static let placeholder: Summary = {
+        let rows = (1...3).map { Stats(name: "placeholder row \($0)", totalMs: 1, p95: 1) }
+        let now = Date.now.timeIntervalSince1970 * 1000
+        return Summary(
+            eventCount: 1,
+            kpis: Kpis(sessions: 0, apiP50: 0, apiP95: 0, ttftP50: 0, turnP50: 0, costUsd: 0, cacheHitRatio: 0),
+            breakdown: Breakdown(api: 1, tools: 1, hooks: 1),
+            // One bucket with no requests draws the "no requests" line, which redacts to a bar.
+            apiSeries: Series(points: [Point(t: now, p50: nil, p95: nil, count: 0)]),
+            hooks: rows,
+            tools: rows,
+            subagents: rows
+        )
+    }()
+}
+
+extension LiveEvent {
+    static let placeholders = (0..<6).map { LiveEvent(tsMs: Double($0), kind: "", label: "placeholder event", ms: 1, ok: true) }
+}
+
+// Soft highlight under the hovered row, the same feedback native lists give.
+struct HoverRow: ViewModifier {
+    @State private var hovering = false
+
+    func body(content: Content) -> some View {
+        content
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(.quaternary.opacity(hovering ? 1 : 0), in: .rect(cornerRadius: 5))
+            .padding(.horizontal, -6)
+            .contentShape(.rect)
+            .onHover { hovering = $0 }
+            .animation(.easeOut(duration: 0.12), value: hovering)
+    }
+}
+
+extension View {
+    func hoverRow() -> some View { modifier(HoverRow()) }
 }
 
 struct SummaryView: View {
@@ -314,6 +424,7 @@ struct SummaryView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .monospacedDigit()
+                    .contentTransition(.numericText())
             }
             LatencyChart(points: summary.apiSeries.points)
             Breakdown(breakdown: summary.breakdown)
@@ -347,7 +458,10 @@ struct Kpi: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 1) {
             Text(title).font(.caption).foregroundStyle(.secondary)
-            Text(value).font(.title3.weight(.semibold)).monospacedDigit()
+            Text(value)
+                .font(.title3.weight(.semibold))
+                .monospacedDigit()
+                .contentTransition(.numericText())
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -380,7 +494,8 @@ struct Swatch: View {
 // One plotted value. `segment` changes at every empty bucket so the line breaks there,
 // like the dashboard's connectNulls: false.
 struct LatencySample: Identifiable {
-    let id: Int
+    // Keyed by series and bucket time so a refresh morphs each point instead of reshuffling them.
+    var id: String { "\(series)-\(time.timeIntervalSince1970)" }
     let time: Date
     let ms: Double
     let series: String
@@ -398,7 +513,7 @@ struct LatencySample: Identifiable {
                     continue
                 }
                 inGap = false
-                samples.append(LatencySample(id: samples.count, time: date(p.t), ms: ms, series: series, segment: "\(series)-\(segment)"))
+                samples.append(LatencySample(time: date(p.t), ms: ms, series: series, segment: "\(series)-\(segment)"))
             }
         }
         return samples
@@ -407,6 +522,7 @@ struct LatencySample: Identifiable {
 
 struct LatencyChart: View {
     let points: [Summary.Point]
+    @State private var hoverTime: Date?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -427,17 +543,35 @@ struct LatencyChart: View {
         }
     }
 
+    // The bucket with requests nearest the pointer, so the callout never shows an empty gap.
+    private var hovered: Summary.Point? {
+        guard let hoverTime else { return nil }
+        let ms = hoverTime.timeIntervalSince1970 * 1000
+        return points.filter { $0.count > 0 }.min { abs($0.t - ms) < abs($1.t - ms) }
+    }
+
     private var chart: some View {
-        Chart(LatencySample.from(points)) { s in
-            LineMark(x: .value("Time", s.time), y: .value("Latency", s.ms), series: .value("Segment", s.segment))
-                .foregroundStyle(by: .value("Series", s.series))
-                .lineStyle(s.series == "p95" ? StrokeStyle(lineWidth: 2, dash: [4, 3]) : StrokeStyle(lineWidth: 2))
-                .interpolationMethod(.monotone)
-            // Points keep a lone bucket visible, since a one-point line draws nothing.
-            PointMark(x: .value("Time", s.time), y: .value("Latency", s.ms))
-                .foregroundStyle(by: .value("Series", s.series))
-                .symbolSize(10)
+        Chart {
+            ForEach(LatencySample.from(points)) { s in
+                LineMark(x: .value("Time", s.time), y: .value("Latency", s.ms), series: .value("Segment", s.segment))
+                    .foregroundStyle(by: .value("Series", s.series))
+                    .lineStyle(s.series == "p95" ? StrokeStyle(lineWidth: 2, dash: [4, 3]) : StrokeStyle(lineWidth: 2))
+                    .interpolationMethod(.monotone)
+                // Points keep a lone bucket visible, since a one-point line draws nothing.
+                PointMark(x: .value("Time", s.time), y: .value("Latency", s.ms))
+                    .foregroundStyle(by: .value("Series", s.series))
+                    .symbolSize(10)
+            }
+            if let p = hovered {
+                RuleMark(x: .value("Time", date(p.t)))
+                    .foregroundStyle(.secondary.opacity(0.5))
+                    .lineStyle(StrokeStyle(lineWidth: 1))
+                    .annotation(position: .top, spacing: 2, overflowResolution: .init(x: .fit(to: .chart), y: .fit(to: .chart))) {
+                        HoverCallout(point: p)
+                    }
+            }
         }
+        .chartXSelection(value: $hoverTime)
         // Span the whole window, not just the buckets that have requests.
         .chartXScale(domain: date(points.first?.t ?? 0)...date(points.last?.t ?? 0))
         .chartYScale(domain: .automatic(includesZero: true))
@@ -458,11 +592,33 @@ struct LatencyChart: View {
     }
 }
 
-struct Breakdown: View {
-    let breakdown: Summary.Breakdown
+struct HoverCallout: View {
+    let point: Summary.Point
 
     var body: some View {
-        let parts = [("API", breakdown.api, Color.blue), ("Tools", breakdown.tools, Color.purple), ("Hooks", breakdown.hooks, Color.orange)]
+        VStack(alignment: .leading, spacing: 1) {
+            Text(date(point.t), format: .dateTime.hour().minute()).foregroundStyle(.secondary)
+            if let p50 = point.p50 { Text("p50 \(fmtMs(p50))") }
+            if let p95 = point.p95 { Text("p95 \(fmtMs(p95))") }
+            Text("\(point.count) req").foregroundStyle(.secondary)
+        }
+        .font(.caption2)
+        .monospacedDigit()
+        .padding(.horizontal, 6)
+        .padding(.vertical, 4)
+        .background(.regularMaterial, in: .rect(cornerRadius: 6))
+        .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(.separator))
+    }
+}
+
+struct Breakdown: View {
+    let breakdown: Summary.Breakdown
+    // Charts ignore redaction, so the skeleton greys the bar out by hand.
+    @Environment(\.redactionReasons) private var redaction
+
+    var body: some View {
+        let colors = redaction.isEmpty ? [Color.blue, .purple, .orange] : [Color.secondary.opacity(0.3), .secondary.opacity(0.2), .secondary.opacity(0.1)]
+        let parts = [("API", breakdown.api, colors[0]), ("Tools", breakdown.tools, colors[1]), ("Hooks", breakdown.hooks, colors[2])]
         let total = parts.reduce(0) { $0 + $1.1 }
         if total > 0 {
             VStack(alignment: .leading, spacing: 5) {
@@ -540,11 +696,13 @@ struct KindStatsList: View {
                 .controlSize(.mini)
                 .fixedSize()
             }
-            if rows.isEmpty {
-                Text("Nothing in this window.").font(.callout).foregroundStyle(.secondary)
-            } else {
-                // A hook and a tool can share a name, so key rows by position.
-                ForEach(Array(rows.enumerated()), id: \.offset) { _, item in
+            VStack(alignment: .leading, spacing: 4) {
+                if rows.isEmpty {
+                    Text("Nothing in this window.").font(.callout).foregroundStyle(.secondary)
+                }
+                // A hook and a tool can share a name, so the kind is part of the key.
+                let ids = uniqueIds(rows.map { "\($0.0.rawValue)/\($0.1.name)" })
+                ForEach(Array(zip(ids, rows)), id: \.0) { _, item in
                     let (rowKind, row) = item
                     HStack(spacing: 6) {
                         if kind == .all {
@@ -553,13 +711,22 @@ struct KindStatsList: View {
                         Text(row.name).lineLimit(1).truncationMode(.middle)
                         Spacer(minLength: 8)
                         if warn(rowKind, row) {
-                            Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .foregroundStyle(.orange)
+                                .transition(.scale.combined(with: .opacity))
                         }
-                        Text(value(row)).foregroundStyle(.secondary).monospacedDigit()
+                        Text(value(row))
+                            .foregroundStyle(.secondary)
+                            .monospacedDigit()
+                            .contentTransition(.numericText())
                     }
                     .font(.callout)
+                    .hoverRow()
+                    .help(row.name)
+                    .transition(.opacity)
                 }
             }
+            .animation(panelAnimation(), value: kind)
         }
     }
 
@@ -584,7 +751,8 @@ struct LiveFeed: View {
         if !events.isEmpty {
             VStack(alignment: .leading, spacing: 4) {
                 SectionTitle("Live")
-                ForEach(Array(events.enumerated()), id: \.offset) { _, e in
+                let ids = uniqueIds(events.map { "\($0.tsMs)/\($0.kind)/\($0.label)" })
+                ForEach(Array(zip(ids, events)), id: \.0) { _, e in
                     HStack(spacing: 6) {
                         Text(date(e.tsMs), format: .dateTime.hour().minute().second())
                             .foregroundStyle(.tertiary)
@@ -599,8 +767,13 @@ struct LiveFeed: View {
                     }
                     .font(.callout)
                     .monospacedDigit()
+                    .hoverRow()
+                    .help(e.label)
+                    // New events push in from the top; the oldest fades out at the bottom.
+                    .transition(.asymmetric(insertion: .move(edge: .top).combined(with: .opacity), removal: .opacity))
                 }
             }
+            .clipped()
         }
     }
 
