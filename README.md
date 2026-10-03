@@ -3,7 +3,9 @@
 A macOS menu bar widget that shows where your Claude Code turns spend their time: model latency, tools, hooks, skills, subagents and MCP startup. The data comes from Claude Code's own OpenTelemetry export. It is received and stored on your machine.
 
 <p align="center">
-  <img src="docs/screenshots/menubar-panel.png" alt="Menu bar panel with API latency, turn time split, slowest and total-time rankings, and live feed" width="360">
+  <img src="docs/screenshots/menubar-demo.gif" alt="Demo: opening the menu bar panel, switching time windows and filters, and opening a hook's detail card" width="360">
+  <br>
+  <a href="docs/screenshots/menubar-demo.mp4">Watch the demo as MP4</a>
 </p>
 
 ## Menu bar widget
@@ -14,6 +16,10 @@ The label shows API p50 latency over the last 15 minutes. When hooks are slow, t
 <br clear="left">
 
 Click the label to open a native SwiftUI panel:
+
+<p align="center">
+  <img src="docs/screenshots/menubar-panel.png" alt="Menu bar panel with API latency, turn time split, slowest and total-time rankings, and live feed" width="360">
+</p>
 
 - **Window picker:** 15m, 1h, 24h or 7d.
 - **Headline numbers:** API p50 and p95, time to first token, turn duration, cost, cache hit rate and session count.
