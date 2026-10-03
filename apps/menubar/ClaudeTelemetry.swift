@@ -7,6 +7,8 @@ import SwiftUI
 struct Status: Decodable {
     let label: String
     let state: String
+    // Missing from older collectors, and empty while idle.
+    let values: [String: String]?
 }
 
 struct Stats: Decodable {
@@ -389,6 +391,7 @@ final class Telemetry {
 struct MenuBarLabel: View {
     let status: Status?
     @AppStorage(Prefs.Key.labelStyle) private var labelStyleRaw = Prefs.LabelStyle.iconAndValue.rawValue
+    @AppStorage(Prefs.Key.labelValue) private var labelValueRaw = Prefs.LabelValue.apiP50.rawValue
     @AppStorage(Prefs.Key.offlineText) private var offlineTextRaw = Prefs.OfflineText.off.rawValue
     @AppStorage(Prefs.Key.bounceIconOnSlow) private var bounceOnSlow = Prefs.Defaults.bounceIconOnSlow
 
@@ -397,7 +400,7 @@ struct MenuBarLabel: View {
         let slow = status?.state == "slow"
         let style = Prefs.LabelStyle(rawValue: labelStyleRaw) ?? .iconAndValue
         let offlineText = Prefs.OfflineText(rawValue: offlineTextRaw) ?? .off
-        let valueText = status?.label ?? offlineText.display
+        let valueText = status.map { labelText($0) } ?? offlineText.display
         // Value-only would otherwise draw nothing while offline with text hidden; keep the icon
         // so the label is never empty.
         let showIcon = style != .valueOnly || valueText == nil
@@ -413,6 +416,13 @@ struct MenuBarLabel: View {
             }
         }
         .accessibilityLabel("Claude Code telemetry")
+    }
+
+    // Idle and older collectors only have the server label. A value with no data yet (TTFT before
+    // any trace spans) shows a dash, not some other metric under the chosen name.
+    private func labelText(_ status: Status) -> String {
+        guard status.state != "idle", let values = status.values else { return status.label }
+        return values[labelValueRaw] ?? "–"
     }
 }
 

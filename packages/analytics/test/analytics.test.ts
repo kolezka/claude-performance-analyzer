@@ -87,6 +87,16 @@ test("status flags slow hooks for the menu bar", () => {
   expect(status(summarize([], [], 15 * 60_000, NOW)).state).toBe("idle");
 });
 
+test("status offers every menu bar value, with label staying API p50", () => {
+  const st = status(summarize(parseLogs(payload), [], 15 * 60_000, NOW));
+  // No trace spans in this payload, so TTFT is unknown and left out rather than shown as 0.
+  expect(Object.keys(st.values).sort()).toEqual(["apiP50", "apiP95", "cacheHit", "cost", "requests", "turnP50"]);
+  expect(st.values.apiP50).toBe(st.label);
+  expect(st.values.cost).toBe("$0.03");
+  expect(st.values.cacheHit).toBe("90%");
+  expect(status(summarize([], [], 15 * 60_000, NOW)).values).toEqual({});
+});
+
 test("ttft and turn time come from trace spans when present", () => {
   const span = (name: string, startAgo: number, dur: number, attrs: any[] = []) => ({
     traceId: "t",

@@ -370,7 +370,17 @@ export function fmtMs(ms: number): string {
 // Menu bar text: median API latency over the window, flagged when hooks eat real time.
 export function status(s: Summary) {
   const k = s.kpis;
-  if (k.apiRequests === 0) return { label: "idle", state: "idle", tooltip: "No Claude Code API requests in the last 15 min" };
+  if (k.apiRequests === 0) return { label: "idle", state: "idle", tooltip: "No Claude Code API requests in the last 15 min", values: {} };
+  // Every value the menu bar can be set to show. "label" stays API p50 for older menu bar builds.
+  const values: Record<string, string> = {
+    apiP50: fmtMs(k.apiP50),
+    apiP95: fmtMs(k.apiP95),
+    turnP50: fmtMs(k.turnP50),
+    cost: `$${k.costUsd.toFixed(2)}`,
+    cacheHit: `${(k.cacheHitRatio * 100).toFixed(0)}%`,
+    requests: String(k.apiRequests),
+  };
+  if (k.ttftP50 !== null) values.ttftP50 = fmtMs(k.ttftP50);
   const slowHook = s.hooks.find((h) => h.p95 > 2000);
   const slow = k.hookShare > 0.15 || !!slowHook;
   const lines = [
@@ -379,7 +389,7 @@ export function status(s: Summary) {
     `Cost $${k.costUsd.toFixed(2)}, cache hit ${(k.cacheHitRatio * 100).toFixed(0)}%`,
   ];
   if (slowHook) lines.push(`Slowest hook: ${slowHook.name} p95 ${fmtMs(slowHook.p95)}`);
-  return { label: fmtMs(k.apiP50), state: slow ? "slow" : "ok", tooltip: lines.join("\n") };
+  return { label: values.apiP50!, state: slow ? "slow" : "ok", tooltip: lines.join("\n"), values };
 }
 
 export interface LiveEvent {
