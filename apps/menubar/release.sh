@@ -18,8 +18,13 @@ VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$SCRI
 TAG="v$VERSION"
 DMG="$BUILD_DIR/ClaudeTelemetry-$VERSION.dmg"
 
-if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null || gh release view "$TAG" >/dev/null 2>&1; then
-    echo "$TAG already exists. Bump CFBundleShortVersionString in Info.plist." >&2
+if gh release view "$TAG" >/dev/null 2>&1; then
+    echo "Release $TAG already exists. Bump CFBundleShortVersionString in Info.plist." >&2
+    exit 1
+fi
+# CI runs on a pushed tag, so an existing tag is fine as long as it points at this commit.
+if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null && [[ "$(git rev-parse "$TAG^{commit}")" != "$(git rev-parse HEAD)" ]]; then
+    echo "Tag $TAG exists but does not point at HEAD." >&2
     exit 1
 fi
 
@@ -35,12 +40,18 @@ hdiutil create -volname ClaudeTelemetry -srcfolder "$STAGING" -ov -format UDZO "
 codesign --sign "$SIGN_IDENTITY" --timestamp "$DMG"
 
 # Notarizing the DMG also notarizes the app inside it.
-xcrun notarytool submit "$DMG" --keychain-profile "$NOTARY_PROFILE" --wait
+NOTARY_ARGS=(--keychain-profile "$NOTARY_PROFILE")
+if [[ -n "${NOTARY_KEYCHAIN:-}" ]]; then
+    NOTARY_ARGS+=(--keychain "$NOTARY_KEYCHAIN")
+fi
+xcrun notarytool submit "$DMG" "${NOTARY_ARGS[@]}" --wait
 xcrun stapler staple "$DMG"
 spctl --assess --type open --context context:primary-signature -vv "$DMG"
 
 if [[ "${PUBLISH:-1}" == "1" ]]; then
-    gh release create "$TAG" "$DMG" --title "ClaudeTelemetry $VERSION" --generate-notes
+    gh release create "$TAG" "$DMG" --title "ClaudeTelemetry $VERSION" --target "$(git rev-parse HEAD)" \
+        --notes "The menu bar app reads data from the local collector. Clone this repository and run \`bun run start\` before opening the app." \
+        --generate-notes
 else
     echo "Built $DMG (not published, PUBLISH=0)"
 fi
