@@ -17,7 +17,7 @@ dev: ## Run collector in development mode
 	bun run dev
 
 build: ## Build the menu bar app
-	apps/menubar/build.sh
+	apps/menubar/scripts/build.sh
 
 open: ## Open the built menu bar app
 	open $(APP)
@@ -25,7 +25,7 @@ open: ## Open the built menu bar app
 app: build open ## Build and open the menu bar app
 
 release: ## Build and notarize the menu bar DMG (publish via the GitHub workflow)
-	apps/menubar/release.sh
+	apps/menubar/scripts/release.sh
 
 test: ## Run tests
 	bun test

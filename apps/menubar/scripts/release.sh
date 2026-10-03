@@ -8,7 +8,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # git and gh must act on this repo, whatever directory the script is called from.
 cd "$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel)"
 
-BUILD_DIR="$SCRIPT_DIR/build"
+APP_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+BUILD_DIR="$APP_ROOT/build"
 APP_DIR="$BUILD_DIR/ClaudeTelemetry.app"
 NOTARY_PROFILE="${NOTARY_PROFILE:-cpa-notary}"
 SIGN_IDENTITY="${SIGN_IDENTITY:-$(security find-identity -v -p codesigning | sed -n 's/.*"\(Developer ID Application: [^"]*\)".*/\1/p' | head -1)}"
@@ -24,7 +25,7 @@ if [[ -n "$(git status --porcelain --untracked-files=no)" ]]; then
     exit 1
 fi
 
-APP_VERSION="${APP_VERSION:-$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$SCRIPT_DIR/Info.plist")}"
+APP_VERSION="${APP_VERSION:-$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP_ROOT/Resources/Info.plist")}"
 APP_BUILD="${APP_BUILD:-$(git rev-list --count HEAD)}"
 TAG="v$APP_VERSION"
 DMG="$BUILD_DIR/ClaudeTelemetry-$APP_VERSION.dmg"

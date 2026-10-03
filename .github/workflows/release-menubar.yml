@@ -83,7 +83,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           PUBLISH: "1"
-        run: apps/menubar/release.sh
+        run: apps/menubar/scripts/release.sh
 
       - name: Delete keychain
         if: always()

@@ -113,7 +113,7 @@ Bun workspaces. Each package has its own `src/` and `test/`.
 | --- | --- |
 | `apps/collector` | Bun OTLP receiver (http/json or http/protobuf, gzip ok) on `127.0.0.1:4318`. Stores to SQLite with 14 day retention. Serves the dashboard and the JSON API. |
 | `apps/dashboard` | Svelte web dashboard, bundled by the collector through its HTML import. |
-| `apps/menubar` | SwiftUI menu bar app (`MenuBarExtra`), built with `swiftc` into a universal (arm64 and x86_64) `.app`. |
+| `apps/menubar` | SwiftUI menu bar app (`MenuBarExtra`), built with `swiftc` into a universal (arm64 and x86_64) `.app`. Code in `Sources/`, plist and icon in `Resources/`, build and release in `scripts/`. |
 | `packages/otlp` | Decodes OTLP http/json and http/protobuf into rows. |
 | `packages/analytics` | Summaries, percentiles, turn timelines. Shared by the collector and the dashboard. |
 | `packages/claude-settings` | Adds the telemetry variables to Claude Code's `settings.json`. |
