@@ -388,6 +388,25 @@ final class Telemetry {
 
 // MARK: - Menu bar label
 
+// The app icon's three-span trace waterfall, redrawn on a point grid so it stays crisp at menu bar size.
+// Template, so the menu bar tints it for light, dark and highlighted states.
+let waterfallIcon: NSImage = {
+    let spans: [NSRect] = [
+        NSRect(x: 0, y: 0, width: 9.5, height: 3),
+        NSRect(x: 4.5, y: 5, width: 7.5, height: 3),
+        NSRect(x: 7.5, y: 10, width: 8.5, height: 3),
+    ]
+    let image = NSImage(size: NSSize(width: 16, height: 13), flipped: true) { _ in
+        NSColor.black.setFill()
+        for span in spans {
+            NSBezierPath(roundedRect: span, xRadius: 0.8, yRadius: 0.8).fill()
+        }
+        return true
+    }
+    image.isTemplate = true
+    return image
+}()
+
 struct MenuBarLabel: View {
     let status: Status?
     @AppStorage(Prefs.Key.labelStyle) private var labelStyleRaw = Prefs.LabelStyle.iconAndValue.rawValue
@@ -407,7 +426,7 @@ struct MenuBarLabel: View {
         let showValue = style != .iconOnly && valueText != nil
         HStack(spacing: 3) {
             if showIcon {
-                Image(systemName: slow ? "exclamationmark.triangle.fill" : "gauge.with.dots.needle.67percent")
+                (slow ? Image(systemName: "exclamationmark.triangle.fill") : Image(nsImage: waterfallIcon))
                     .contentTransition(.symbolEffect(.replace))
                     .symbolEffect(.bounce, value: bounceOnSlow ? slow : false)
             }
