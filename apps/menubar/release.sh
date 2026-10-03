@@ -30,12 +30,25 @@ TAG="v$APP_VERSION"
 DMG="$BUILD_DIR/ClaudeTelemetry-$APP_VERSION.dmg"
 HEAD_SHA="$(git rev-parse HEAD)"
 
+# Commit a remote tag points at. ls-remote lists the tag object before the
+# peeled commit, so pick the ^{} line by name and fall back for lightweight tags.
+remote_tag_commit() {
+    local refs
+    refs="$(git ls-remote origin "refs/tags/$TAG" "refs/tags/$TAG^{}")"
+    awk -v peeled="refs/tags/$TAG^{}" '$2 == peeled {print $1; found=1} END {if (!found) exit 1}' <<< "$refs" ||
+        awk -v plain="refs/tags/$TAG" '$2 == plain {print $1}' <<< "$refs"
+}
+
 if [[ "${PUBLISH:-0}" == "1" ]]; then
     if gh release view "$TAG" >/dev/null 2>&1; then
-        echo "Release $TAG already exists." >&2
+        echo "Release $TAG already exists. If it is a leftover draft, delete it and run again." >&2
         exit 1
     fi
-    REMOTE_TAG_SHA="$(git ls-remote origin "refs/tags/$TAG^{}" "refs/tags/$TAG" | awk 'NR==1 {print $1}')"
+    if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null && [[ "$(git rev-parse "$TAG^{commit}")" != "$HEAD_SHA" ]]; then
+        echo "Local tag $TAG points at a different commit." >&2
+        exit 1
+    fi
+    REMOTE_TAG_SHA="$(remote_tag_commit)"
     if [[ -n "$REMOTE_TAG_SHA" && "$REMOTE_TAG_SHA" != "$HEAD_SHA" ]]; then
         echo "Tag $TAG already exists on origin at a different commit." >&2
         exit 1
@@ -71,9 +84,14 @@ if [[ "${PUBLISH:-0}" != "1" ]]; then
     exit 0
 fi
 
-if [[ -z "$(git ls-remote origin "refs/tags/$TAG")" ]]; then
-    git tag "$TAG" "$HEAD_SHA"
-    git push origin "refs/tags/$TAG"
+# Without --force, git refuses to move a tag someone created in the meantime.
+if [[ -z "$(remote_tag_commit)" ]]; then
+    git push origin "$HEAD_SHA:refs/tags/$TAG"
+fi
+# --verify-tag only checks that the tag exists, so confirm it is still ours.
+if [[ "$(remote_tag_commit)" != "$HEAD_SHA" ]]; then
+    echo "Tag $TAG on origin no longer points at $HEAD_SHA. Not publishing." >&2
+    exit 1
 fi
 gh release create "$TAG" "$DMG" --verify-tag --title "ClaudeTelemetry $APP_VERSION" \
     --notes "The menu bar app reads data from the local collector. Clone this repository and run \`bun run start\` before opening the app." \
