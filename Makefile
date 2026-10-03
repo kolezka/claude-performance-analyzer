@@ -2,7 +2,7 @@
 
 APP := apps/menubar/build/ClaudeTelemetry.app
 
-.PHONY: help install start dev app build open test typecheck check clean
+.PHONY: help install start dev app build open release test typecheck check clean
 
 help: ## Show available targets
 	@awk 'BEGIN {FS = ":.*## "} /^[a-z-]+:.*## / {printf "  \033[36m%-10s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -23,6 +23,9 @@ open: ## Open the built menu bar app
 	open $(APP)
 
 app: build open ## Build and open the menu bar app
+
+release: ## Build, notarize and publish the menu bar DMG to GitHub
+	apps/menubar/release.sh
 
 test: ## Run tests
 	bun test

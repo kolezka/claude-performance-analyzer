@@ -25,6 +25,12 @@ rm "$BUILD_DIR"/ClaudeTelemetry-arm64 "$BUILD_DIR"/ClaudeTelemetry-x86_64
 
 cp "$SCRIPT_DIR/Info.plist" "$CONTENTS_DIR/Info.plist"
 
-codesign --force --sign - "$APP_DIR"
+# Ad-hoc by default. Set SIGN_IDENTITY to a Developer ID for a release build.
+SIGN_IDENTITY="${SIGN_IDENTITY:--}"
+if [[ "$SIGN_IDENTITY" == "-" ]]; then
+    codesign --force --sign - "$APP_DIR"
+else
+    codesign --force --options runtime --timestamp --sign "$SIGN_IDENTITY" "$APP_DIR"
+fi
 
 echo "Built $APP_DIR"
