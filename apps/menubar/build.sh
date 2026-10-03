@@ -25,6 +25,15 @@ rm "$BUILD_DIR"/ClaudeTelemetry-arm64 "$BUILD_DIR"/ClaudeTelemetry-x86_64
 
 cp "$SCRIPT_DIR/Info.plist" "$CONTENTS_DIR/Info.plist"
 
+# Compiles the Icon Composer icon into Assets.car (light and dark) plus an .icns for older macOS.
+# actool ships with Xcode 26, not with the Command Line Tools alone.
+mkdir -p "$CONTENTS_DIR/Resources"
+xcrun actool "$SCRIPT_DIR/AppIcon.icon" --compile "$CONTENTS_DIR/Resources" \
+    --platform macosx --minimum-deployment-target "$MIN_MACOS" --app-icon AppIcon \
+    --output-partial-info-plist "$BUILD_DIR/icon-partial.plist" \
+    --errors --warnings --output-format human-readable-text
+rm "$BUILD_DIR/icon-partial.plist"
+
 # Ad-hoc by default. Set SIGN_IDENTITY to a Developer ID for a release build.
 SIGN_IDENTITY="${SIGN_IDENTITY:--}"
 if [[ "$SIGN_IDENTITY" == "-" ]]; then
