@@ -566,7 +566,8 @@ struct PanelView: View {
         NSApp.activate(ignoringOtherApps: true)
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
             NSApp.activate(ignoringOtherApps: true)
-            let settingsWindow = NSApp.windows.first { $0.title == "Settings" } ?? NSApp.windows.last
+            // Match by identifier: the title follows the selected tab, and a fallback could raise the panel.
+            let settingsWindow = NSApp.windows.first { $0.identifier?.rawValue.contains("Settings") == true }
             settingsWindow?.makeKeyAndOrderFront(nil)
         }
     }
