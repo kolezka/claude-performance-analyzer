@@ -17,6 +17,7 @@ enum Prefs {
         static let enabledWindows = "enabledWindows"
         static let keepDetailOpen = "keepDetailOpen"
         static let labelStyle = "labelStyle"
+        static let labelValue = "labelValue"
         static let offlineText = "offlineText"
         static let bounceIconOnSlow = "bounceIconOnSlow"
         static let panelWidth = "panelWidth"
@@ -36,7 +37,7 @@ enum Prefs {
         // tab's default time window, just under its original pre-Settings name.
         static let allManaged = [
             window, collectorURL, statusPollIntervalSec, panelPollIntervalSec, requestTimeoutSec,
-            retryDelaySec, enabledWindows, keepDetailOpen, labelStyle, offlineText, bounceIconOnSlow,
+            retryDelaySec, enabledWindows, keepDetailOpen, labelStyle, labelValue, offlineText, bounceIconOnSlow,
             panelWidth, showKpis, showLatencyChart, showBreakdown, showSlowest, showTotalTime,
             showLiveFeed, rowsPerList, liveFeedLength, hideHookStartEvents, hookWarnThresholdMs,
             animationsMode,
@@ -138,6 +139,22 @@ enum Prefs {
             case .iconAndValue: "Icon and Value"
             case .iconOnly: "Icon Only"
             case .valueOnly: "Value Only"
+            }
+        }
+    }
+
+    // Raw values match the keys of the collector's api/status "values" object.
+    enum LabelValue: String, CaseIterable {
+        case apiP50, apiP95, ttftP50, turnP50, cost, cacheHit, requests
+        var title: String {
+            switch self {
+            case .apiP50: "API latency p50"
+            case .apiP95: "API latency p95"
+            case .ttftP50: "Time to first token p50"
+            case .turnP50: "Turn time p50"
+            case .cost: "Cost"
+            case .cacheHit: "Cache hit ratio"
+            case .requests: "API requests"
             }
         }
     }
@@ -368,6 +385,7 @@ struct ConnectionSettingsTab: View {
 
 struct MenuBarSettingsTab: View {
     @AppStorage(Prefs.Key.labelStyle) private var labelStyleRaw = Prefs.LabelStyle.iconAndValue.rawValue
+    @AppStorage(Prefs.Key.labelValue) private var labelValueRaw = Prefs.LabelValue.apiP50.rawValue
     @AppStorage(Prefs.Key.offlineText) private var offlineTextRaw = Prefs.OfflineText.off.rawValue
     @AppStorage(Prefs.Key.bounceIconOnSlow) private var bounceOnSlow = Prefs.Defaults.bounceIconOnSlow
 
@@ -375,6 +393,15 @@ struct MenuBarSettingsTab: View {
         Form {
             Picker("Label style", selection: $labelStyleRaw) {
                 ForEach(Prefs.LabelStyle.allCases, id: \.rawValue) { Text($0.title).tag($0.rawValue) }
+            }
+            Section {
+                Picker("Value", selection: $labelValueRaw) {
+                    ForEach(Prefs.LabelValue.allCases, id: \.rawValue) { Text($0.title).tag($0.rawValue) }
+                }
+            } footer: {
+                Text("Measured over the last 15 minutes.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
             }
             Picker("Offline text", selection: $offlineTextRaw) {
                 ForEach(Prefs.OfflineText.allCases, id: \.rawValue) { Text($0.title).tag($0.rawValue) }
