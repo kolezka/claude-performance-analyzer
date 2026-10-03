@@ -40,6 +40,8 @@ enum Prefs {
             panelWidth, showKpis, showLatencyChart, showBreakdown, showSlowest, showTotalTime,
             showLiveFeed, rowsPerList, liveFeedLength, hideHookStartEvents, hookWarnThresholdMs,
             animationsMode,
+            // Kind pickers inside the panel's two lists, persisted since before Settings existed.
+            "slowestKind", "totalTimeKind",
         ]
     }
 
@@ -65,16 +67,23 @@ enum Prefs {
         min(max(value, range.lowerBound), range.upperBound)
     }
 
+    // min/max pass NaN straight through, and a NaN interval or Int(NaN) would trap.
+    static func clamp(_ value: Double, _ range: ClosedRange<Double>) -> Double {
+        value.isNaN ? range.lowerBound : min(max(value, range.lowerBound), range.upperBound)
+    }
+
     static var defaultCollectorURL: URL { URL(string: Defaults.collectorURLString)! }
 
     // A typed-in or stored collector URL is only ever applied once it is actually http(s) with a host.
+    // The path gets a trailing slash, since "api/status" resolved against "/collector" would drop it.
     static func validCollectorURL(_ raw: String) -> URL? {
-        guard let components = URLComponents(string: raw),
+        guard var components = URLComponents(string: raw.trimmingCharacters(in: .whitespaces)),
               let scheme = components.scheme?.lowercased(), scheme == "http" || scheme == "https",
               let host = components.host, !host.isEmpty,
-              let url = components.url
+              components.query == nil, components.fragment == nil
         else { return nil }
-        return url
+        if !components.path.hasSuffix("/") { components.path += "/" }
+        return components.url
     }
 
     static func loadCollectorURL() -> URL {
@@ -224,6 +233,8 @@ struct GeneralSettingsTab: View {
             }
         }
         .formStyle(.grouped)
+        // The login item can change outside this tab (Reset, System Settings), so re-read it.
+        .onAppear { loginItemEnabled = SMAppService.mainApp.status == .enabled }
     }
 
     private var loginItemBinding: Binding<Bool> {
@@ -282,8 +293,12 @@ struct ConnectionSettingsTab: View {
     var body: some View {
         Form {
             Section("Collector") {
-                TextField("Collector URL", text: $urlDraft)
-                    .onSubmit(applyURL)
+                HStack {
+                    TextField("Collector URL", text: $urlDraft)
+                        .onSubmit(applyURL)
+                    Button("Apply", action: applyURL)
+                        .disabled(urlDraft == model.collectorURL.absoluteString)
+                }
                 if let urlError {
                     Text(urlError).font(.caption).foregroundStyle(.red)
                 }
@@ -319,15 +334,18 @@ struct ConnectionSettingsTab: View {
         }
         .formStyle(.grouped)
         .onAppear { urlDraft = model.collectorURL.absoluteString }
+        // A result belongs to the URL that was tested, so editing the draft clears it.
+        .onChange(of: urlDraft) { testResult = nil }
     }
 
     private func applyURL() {
         guard let url = Prefs.validCollectorURL(urlDraft) else {
-            urlError = "Enter a valid http or https URL with a host."
+            urlError = "Enter a valid http or https URL with a host, without query or fragment."
             return
         }
         urlError = nil
         model.collectorURL = url
+        urlDraft = url.absoluteString
     }
 
     private func testConnection() async {
@@ -338,7 +356,10 @@ struct ConnectionSettingsTab: View {
         urlError = nil
         isTesting = true
         defer { isTesting = false }
-        switch await model.testConnection(url: url) {
+        let testedDraft = urlDraft
+        let result = await model.testConnection(url: url)
+        guard urlDraft == testedDraft else { return }
+        switch result {
         case .success: testResult = .ok
         case .failure(let error): testResult = .failure(error.localizedDescription)
         }
@@ -396,17 +417,17 @@ struct PanelSettingsTab: View {
                 Toggle("Live feed", isOn: $showLiveFeed)
             }
             Section("Lists") {
-                Stepper(value: $rowsPerList, in: 3...15) {
+                Stepper(value: $rowsPerList, in: 3...8) {
                     Text("Rows per list: \(rowsPerList)")
                 }
-                Stepper(value: $liveFeedLength, in: 5...50) {
+                Stepper(value: $liveFeedLength, in: 5...15) {
                     Text("Live feed length: \(liveFeedLength)")
                 }
                 Toggle("Hide hook-start events", isOn: $hideHookStartEvents)
             }
             Section("Highlighting") {
                 Stepper(value: $hookWarnThresholdMs, in: 500...10000, step: 100) {
-                    Text("Hook warn threshold: \(Int(hookWarnThresholdMs))ms")
+                    Text("Hook warn threshold: \(Int(Prefs.clamp(hookWarnThresholdMs, 500...10000)))ms")
                 }
                 Text("Only affects this panel's Slowest highlight. The collector's own slow state always uses a fixed rule.")
                     .font(.footnote)
@@ -425,11 +446,15 @@ struct PanelSettingsTab: View {
 struct AdvancedSettingsTab: View {
     @Bindable var model: Telemetry
     @State private var showResetConfirm = false
+    @State private var resetError: String?
 
     var body: some View {
         Form {
             Section("Reset") {
                 Button("Reset All Settings…", role: .destructive) { showResetConfirm = true }
+                if let resetError {
+                    Text(resetError).font(.caption).foregroundStyle(.red)
+                }
             }
             Section("Files") {
                 Button("Reveal Preferences File") { revealPreferencesFile() }
@@ -437,8 +462,20 @@ struct AdvancedSettingsTab: View {
         }
         .formStyle(.grouped)
         .confirmationDialog("Reset all settings to their defaults?", isPresented: $showResetConfirm, titleVisibility: .visible) {
-            Button("Reset", role: .destructive) { model.resetAllSettings() }
+            Button("Reset", role: .destructive, action: resetAll)
             Button("Cancel", role: .cancel) {}
+        }
+    }
+
+    // Launch at login is off by default, so a full reset also removes the login item.
+    private func resetAll() {
+        model.resetAllSettings()
+        resetError = nil
+        guard SMAppService.mainApp.status == .enabled else { return }
+        do {
+            try SMAppService.mainApp.unregister()
+        } catch {
+            resetError = "Settings reset, but launch at login is still on: \(error.localizedDescription)"
         }
     }
 

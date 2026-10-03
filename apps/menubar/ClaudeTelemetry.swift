@@ -211,6 +211,12 @@ final class Telemetry {
         didSet {
             guard collectorURL != oldValue else { return }
             UserDefaults.standard.set(collectorURL.absoluteString, forKey: Prefs.Key.collectorURL)
+            // Drop the old collector's numbers so a slow new host cannot pass them off as its own.
+            status = nil
+            summary = nil
+            summaryError = nil
+            live = []
+            updatedAt = nil
             restartStatusPolling()
             restartPanelPolling()
         }
@@ -363,12 +369,14 @@ final class Telemetry {
     }
 
     // Tests an arbitrary URL (the Settings draft), not necessarily the one currently applied.
+    // Decodes Status like the real poll, so any other server answering 200 does not pass.
     func testConnection(url: URL) async -> Result<Void, Error> {
         do {
-            let (_, response) = try await session.data(from: URL(string: "api/status", relativeTo: url)!)
+            let (data, response) = try await session.data(from: URL(string: "api/status", relativeTo: url)!)
             if let http = response as? HTTPURLResponse, http.statusCode != 200 {
                 throw URLError(.badServerResponse)
             }
+            _ = try JSONDecoder().decode(Status.self, from: data)
             return .success(())
         } catch {
             return .failure(error)
@@ -1036,7 +1044,7 @@ struct KindStatsList: View {
         case .hooks: hooks
         case .agents: agents
         }
-        return Array(picked.sorted { metric($0.1) > metric($1.1) }.prefix(Prefs.clamp(rowsPerList, 3...15)))
+        return Array(picked.sorted { metric($0.1) > metric($1.1) }.prefix(Prefs.clamp(rowsPerList, 3...8)))
     }
 }
 
@@ -1051,7 +1059,7 @@ struct LiveFeed: View {
             VStack(alignment: .leading, spacing: 4) {
                 SectionTitle("Live")
                 let ids = rowIds(events.map { "\($0.tsMs)/\($0.sessionId ?? "")/\($0.kind)/\($0.label)" })
-                ForEach(Array(zip(ids, events).prefix(Prefs.clamp(liveFeedLength, 5...50))), id: \.0) { _, e in
+                ForEach(Array(zip(ids, events).prefix(Prefs.clamp(liveFeedLength, 5...15))), id: \.0) { _, e in
                     row(e)
                 }
             }
