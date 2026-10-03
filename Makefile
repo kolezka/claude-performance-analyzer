@@ -24,7 +24,7 @@ open: ## Open the built menu bar app
 
 app: build open ## Build and open the menu bar app
 
-release: ## Build, notarize and publish the menu bar DMG to GitHub
+release: ## Build and notarize the menu bar DMG (publish via the GitHub workflow)
 	apps/menubar/release.sh
 
 test: ## Run tests

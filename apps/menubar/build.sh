@@ -24,6 +24,13 @@ lipo -create "$BUILD_DIR"/ClaudeTelemetry-arm64 "$BUILD_DIR"/ClaudeTelemetry-x86
 rm "$BUILD_DIR"/ClaudeTelemetry-arm64 "$BUILD_DIR"/ClaudeTelemetry-x86_64
 
 cp "$SCRIPT_DIR/Info.plist" "$CONTENTS_DIR/Info.plist"
+# Release builds take the version from the git tag, not from the checked-in plist.
+if [[ -n "${APP_VERSION:-}" ]]; then
+    /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $APP_VERSION" "$CONTENTS_DIR/Info.plist"
+fi
+if [[ -n "${APP_BUILD:-}" ]]; then
+    /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $APP_BUILD" "$CONTENTS_DIR/Info.plist"
+fi
 
 # Ad-hoc by default. Set SIGN_IDENTITY to a Developer ID for a release build.
 SIGN_IDENTITY="${SIGN_IDENTITY:--}"
