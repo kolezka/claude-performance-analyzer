@@ -3,7 +3,7 @@
 A macOS menu bar widget that shows where your Claude Code turns spend their time: model latency, tools, hooks, skills, subagents and MCP startup. The data comes from Claude Code's own OpenTelemetry export. It is received and stored on your machine.
 
 <p align="center">
-  <img src="docs/screenshots/menubar-panel.png" alt="Menu bar panel with API latency, turn time split, slowest hooks, tools and live feed" width="360">
+  <img src="docs/screenshots/menubar-panel.png" alt="Menu bar panel with API latency, turn time split, slowest and total-time rankings, and live feed" width="360">
 </p>
 
 ## Menu bar widget
