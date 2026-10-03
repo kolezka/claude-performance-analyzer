@@ -1,8 +1,13 @@
 name: Release menu bar app
 
 on:
-  push:
-    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: Version part to bump
+        type: choice
+        options: [patch, minor, major]
+        default: patch
 
 permissions:
   contents: write
@@ -13,19 +18,32 @@ concurrency:
 
 jobs:
   release:
+    if: github.ref == 'refs/heads/main'
     runs-on: macos-26
-    # Holds the signing secrets. Add a required reviewer so every run waits for approval.
+    # Holds the signing secrets. A required reviewer makes every run wait for approval.
     environment: release
     steps:
-      - uses: actions/checkout@v4
+      # v7.0.1, pinned by SHA because this job holds the signing key.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          fetch-tags: true
 
-      - name: Check tag matches Info.plist
+      - name: Compute next version
+        env:
+          BUMP: ${{ inputs.bump }}
         run: |
-          VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' apps/menubar/Info.plist)"
-          if [[ "v$VERSION" != "$GITHUB_REF_NAME" ]]; then
-            echo "Tag $GITHUB_REF_NAME does not match Info.plist version $VERSION" >&2
-            exit 1
-          fi
+          LATEST="$(git tag -l --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -1 || true)"
+          IFS=. read -r MAJOR MINOR PATCH <<< "${LATEST#v}"
+          MAJOR="${MAJOR:-0}" MINOR="${MINOR:-0}" PATCH="${PATCH:-0}"
+          case "$BUMP" in
+            major) MAJOR=$((MAJOR + 1)); MINOR=0; PATCH=0 ;;
+            minor) MINOR=$((MINOR + 1)); PATCH=0 ;;
+            patch) PATCH=$((PATCH + 1)) ;;
+          esac
+          VERSION="$MAJOR.$MINOR.$PATCH"
+          echo "Latest tag: ${LATEST:-none}, next version: $VERSION"
+          echo "APP_VERSION=$VERSION" >> "$GITHUB_ENV"
 
       - name: Import signing certificate
         env:
@@ -40,7 +58,7 @@ jobs:
           security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
           security import "$RUNNER_TEMP/cert.p12" -P "$DEVELOPER_ID_P12_PASSWORD" -f pkcs12 -k "$KEYCHAIN" -T /usr/bin/codesign
           security set-key-partition-list -S apple-tool:,apple: -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN" > /dev/null
-          security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
+          security list-keychains -d user -s "$KEYCHAIN" login.keychain-db
           rm "$RUNNER_TEMP/cert.p12"
           echo "NOTARY_KEYCHAIN=$KEYCHAIN" >> "$GITHUB_ENV"
 
@@ -57,6 +75,7 @@ jobs:
       - name: Build, notarize and publish
         env:
           GH_TOKEN: ${{ github.token }}
+          PUBLISH: "1"
         run: apps/menubar/release.sh
 
       - name: Delete keychain
