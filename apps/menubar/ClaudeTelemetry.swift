@@ -2,9 +2,6 @@ import AppKit
 import Charts
 import SwiftUI
 
-// Dashboard and JSON endpoints served by the local collector.
-private let collectorURL = URL(string: "http://127.0.0.1:4318/")!
-
 // MARK: - Payloads (the fields of src/analytics.ts the panel shows)
 
 struct Status: Decodable {
@@ -157,10 +154,15 @@ func copyToPasteboard(_ string: String) {
     NSPasteboard.general.setString(string, forType: .string)
 }
 
-// One motion curve for the whole panel, or none when the user turned on Reduce Motion.
+// One motion curve for the whole panel. Respects the Animations setting: on, off, or following
+// Reduce Motion, which is the original behavior and stays the default.
 @MainActor
 func panelAnimation() -> Animation? {
-    NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? nil : .smooth(duration: 0.35)
+    switch Prefs.animationsMode() {
+    case .on: .smooth(duration: 0.35)
+    case .off: nil
+    case .followSystem: NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? nil : .smooth(duration: 0.35)
+    }
 }
 
 // A ForEach id for a key that may repeat. A struct, so no key can mimic another's suffix.
@@ -194,21 +196,56 @@ final class Telemetry {
     var panelOpen = false {
         didSet { if panelOpen != oldValue { restartPanelPolling() } }
     }
-    var minutes = UserDefaults.standard.object(forKey: "window") as? Int ?? 60 {
+    var minutes = UserDefaults.standard.object(forKey: Prefs.Key.window) as? Int ?? Prefs.Defaults.minutes {
         didSet {
-            UserDefaults.standard.set(minutes, forKey: "window")
+            UserDefaults.standard.set(minutes, forKey: Prefs.Key.window)
             summary = nil
             summaryError = nil
             restartPanelPolling()
         }
     }
 
-    @ObservationIgnored private let session: URLSession = {
-        let config = URLSessionConfiguration.ephemeral
-        config.timeoutIntervalForRequest = 2.0
-        config.timeoutIntervalForResource = 5.0
-        return URLSession(configuration: config)
-    }()
+    // Connection settings. Each setter persists, then rebuilds whatever it affects, so a change
+    // made in Settings takes effect immediately instead of waiting for the next poll.
+    var collectorURL: URL = Prefs.loadCollectorURL() {
+        didSet {
+            guard collectorURL != oldValue else { return }
+            UserDefaults.standard.set(collectorURL.absoluteString, forKey: Prefs.Key.collectorURL)
+            restartStatusPolling()
+            restartPanelPolling()
+        }
+    }
+    var statusPollIntervalSec = Prefs.loadInterval(Prefs.Key.statusPollIntervalSec, default: Prefs.Defaults.statusPollIntervalSec) {
+        didSet {
+            guard statusPollIntervalSec != oldValue else { return }
+            UserDefaults.standard.set(statusPollIntervalSec, forKey: Prefs.Key.statusPollIntervalSec)
+            restartStatusPolling()
+        }
+    }
+    var panelPollIntervalSec = Prefs.loadInterval(Prefs.Key.panelPollIntervalSec, default: Prefs.Defaults.panelPollIntervalSec) {
+        didSet {
+            guard panelPollIntervalSec != oldValue else { return }
+            UserDefaults.standard.set(panelPollIntervalSec, forKey: Prefs.Key.panelPollIntervalSec)
+            restartPanelPolling()
+        }
+    }
+    var requestTimeoutSec = Prefs.loadRequestTimeout() {
+        didSet {
+            guard requestTimeoutSec != oldValue else { return }
+            UserDefaults.standard.set(requestTimeoutSec, forKey: Prefs.Key.requestTimeoutSec)
+            rebuildSession()
+            restartStatusPolling()
+            restartPanelPolling()
+        }
+    }
+    var retryDelaySec = Prefs.loadInterval(Prefs.Key.retryDelaySec, default: Prefs.Defaults.retryDelaySec) {
+        didSet {
+            guard retryDelaySec != oldValue else { return }
+            UserDefaults.standard.set(retryDelaySec, forKey: Prefs.Key.retryDelaySec)
+        }
+    }
+
+    @ObservationIgnored private var session: URLSession = Telemetry.makeSession(requestTimeout: Prefs.loadRequestTimeout())
     @ObservationIgnored private var panelTask: Task<Void, Never>?
     @ObservationIgnored private var statusTask: Task<Void, Never>?
 
@@ -216,10 +253,31 @@ final class Telemetry {
         restartStatusPolling()
     }
 
-    // Skips the 2s wait after a failure.
+    // Skips the retry-delay wait after a failure.
     func retry() {
         restartStatusPolling()
         restartPanelPolling()
+    }
+
+    func resetAllSettings() {
+        for key in Prefs.Key.allManaged { UserDefaults.standard.removeObject(forKey: key) }
+        collectorURL = Prefs.defaultCollectorURL
+        statusPollIntervalSec = Prefs.Defaults.statusPollIntervalSec
+        panelPollIntervalSec = Prefs.Defaults.panelPollIntervalSec
+        requestTimeoutSec = Prefs.Defaults.requestTimeoutSec
+        retryDelaySec = Prefs.Defaults.retryDelaySec
+        minutes = Prefs.Defaults.minutes
+    }
+
+    private static func makeSession(requestTimeout: Double) -> URLSession {
+        let config = URLSessionConfiguration.ephemeral
+        config.timeoutIntervalForRequest = requestTimeout
+        config.timeoutIntervalForResource = Prefs.resourceTimeout(forRequestTimeout: requestTimeout)
+        return URLSession(configuration: config)
+    }
+
+    private func rebuildSession() {
+        session = Telemetry.makeSession(requestTimeout: requestTimeoutSec)
     }
 
     // Status runs on its own loop so slow summary requests never delay the label.
@@ -228,16 +286,23 @@ final class Telemetry {
         statusTask?.cancel()
         statusTask = Task {
             while !Task.isCancelled {
-                await refreshStatus()
-                try? await Task.sleep(for: .seconds(2))
+                let ok = await refreshStatus()
+                try? await Task.sleep(for: .seconds(Prefs.clamp(ok ? statusPollIntervalSec : retryDelaySec, 1...60)))
             }
         }
     }
 
-    private func refreshStatus() async {
-        let newStatus: Status? = try? await get("api/status")
-        guard !Task.isCancelled else { return }
-        withAnimation(panelAnimation()) { status = newStatus }
+    private func refreshStatus() async -> Bool {
+        do {
+            let newStatus: Status = try await get("api/status")
+            guard !Task.isCancelled else { return true }
+            withAnimation(panelAnimation()) { status = newStatus }
+            return true
+        } catch {
+            guard !Task.isCancelled else { return true }
+            withAnimation(panelAnimation()) { status = nil }
+            return false
+        }
     }
 
     // One panel loop at a time: closing the panel or switching window cancels the old one,
@@ -248,17 +313,17 @@ final class Telemetry {
         guard panelOpen else { return }
         panelTask = Task {
             while !Task.isCancelled {
-                await refreshPanel()
-                try? await Task.sleep(for: .seconds(2))
+                let ok = await refreshPanel()
+                try? await Task.sleep(for: .seconds(Prefs.clamp(ok ? panelPollIntervalSec : retryDelaySec, 1...60)))
             }
         }
     }
 
-    private func refreshPanel() async {
+    private func refreshPanel() async -> Bool {
         do {
             let newSummary: Summary = try await get("api/summary?minutes=\(minutes)")
             let newLive: [LiveEvent]? = try? await get("api/live")
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled else { return true }
             // Animating here lets numbers roll, rows slide and charts morph on every refresh.
             withAnimation(panelAnimation()) {
                 summary = newSummary
@@ -266,9 +331,11 @@ final class Telemetry {
                 live = newLive ?? live
             }
             updatedAt = .now
+            return true
         } catch {
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled else { return true }
             withAnimation(panelAnimation()) { summaryError = error.localizedDescription }
+            return false
         }
     }
 
@@ -294,21 +361,48 @@ final class Telemetry {
         ]
         return try await get(components.string!)
     }
+
+    // Tests an arbitrary URL (the Settings draft), not necessarily the one currently applied.
+    func testConnection(url: URL) async -> Result<Void, Error> {
+        do {
+            let (_, response) = try await session.data(from: URL(string: "api/status", relativeTo: url)!)
+            if let http = response as? HTTPURLResponse, http.statusCode != 200 {
+                throw URLError(.badServerResponse)
+            }
+            return .success(())
+        } catch {
+            return .failure(error)
+        }
+    }
 }
 
 // MARK: - Menu bar label
 
 struct MenuBarLabel: View {
     let status: Status?
+    @AppStorage(Prefs.Key.labelStyle) private var labelStyleRaw = Prefs.LabelStyle.iconAndValue.rawValue
+    @AppStorage(Prefs.Key.offlineText) private var offlineTextRaw = Prefs.OfflineText.off.rawValue
+    @AppStorage(Prefs.Key.bounceIconOnSlow) private var bounceOnSlow = Prefs.Defaults.bounceIconOnSlow
 
     var body: some View {
         // MenuBarExtra draws the label as a template, so "slow" swaps the symbol instead of tinting.
         let slow = status?.state == "slow"
+        let style = Prefs.LabelStyle(rawValue: labelStyleRaw) ?? .iconAndValue
+        let offlineText = Prefs.OfflineText(rawValue: offlineTextRaw) ?? .off
+        let valueText = status?.label ?? offlineText.display
+        // Value-only would otherwise draw nothing while offline with text hidden; keep the icon
+        // so the label is never empty.
+        let showIcon = style != .valueOnly || valueText == nil
+        let showValue = style != .iconOnly && valueText != nil
         HStack(spacing: 3) {
-            Image(systemName: slow ? "exclamationmark.triangle.fill" : "gauge.with.dots.needle.67percent")
-                .contentTransition(.symbolEffect(.replace))
-                .symbolEffect(.bounce, value: slow)
-            Text(status?.label ?? "off").monospacedDigit()
+            if showIcon {
+                Image(systemName: slow ? "exclamationmark.triangle.fill" : "gauge.with.dots.needle.67percent")
+                    .contentTransition(.symbolEffect(.replace))
+                    .symbolEffect(.bounce, value: bounceOnSlow ? slow : false)
+            }
+            if showValue, let valueText {
+                Text(valueText).monospacedDigit()
+            }
         }
         .accessibilityLabel("Claude Code telemetry")
     }
@@ -321,6 +415,10 @@ struct PanelView: View {
     // Overlay navigation stack: empty closes it, one entry shows a detail, two lets "back" return
     // from a recent call's event detail to the aggregate that opened it.
     @State private var detailStack: [DetailRoute] = []
+    @Environment(\.openSettings) private var openSettings
+    @AppStorage(Prefs.Key.panelWidth) private var panelWidth = Prefs.Defaults.panelWidth
+    @AppStorage(Prefs.Key.keepDetailOpen) private var keepDetailOpen = Prefs.Defaults.keepDetailOpen
+    @AppStorage(Prefs.Key.enabledWindows) private var enabledWindowsRaw = Prefs.Defaults.enabledWindowsRaw
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -332,11 +430,11 @@ struct PanelView: View {
         .padding(14)
         // An overlay takes the panel's size, so the card gets a fixed height to scroll in.
         .overlay { DetailOverlay(model: model, stack: $detailStack) }
-        .frame(width: 360)
+        .frame(width: CGFloat(panelWidth))
         .onAppear { model.panelOpen = true }
         .onDisappear {
             model.panelOpen = false
-            detailStack = []
+            if !keepDetailOpen { detailStack = [] }
         }
     }
 
@@ -364,10 +462,9 @@ struct PanelView: View {
             }
             Spacer()
             Picker("Window", selection: $model.minutes) {
-                Text("15m").tag(15)
-                Text("1h").tag(60)
-                Text("24h").tag(1440)
-                Text("7d").tag(10080)
+                ForEach(Prefs.parseEnabledWindows(enabledWindowsRaw)) { option in
+                    Text(option.label).tag(option.rawValue)
+                }
             }
             .pickerStyle(.segmented)
             .labelsHidden()
@@ -434,7 +531,7 @@ struct PanelView: View {
                 EmptyState(
                     title: "Couldn't load summary",
                     symbol: "exclamationmark.triangle",
-                    message: "\(error) Retrying every 2s.",
+                    message: "\(error) Retrying every \(Int(model.retryDelaySec))s.",
                     retry: model.retry
                 )
                 .id("error")
@@ -448,15 +545,30 @@ struct PanelView: View {
     private var footer: some View {
         HStack {
             Button("Open Dashboard", systemImage: "arrow.up.right.square") {
-                NSWorkspace.shared.open(collectorURL)
+                NSWorkspace.shared.open(model.collectorURL)
             }
             .keyboardShortcut("d")
             .help("Open the dashboard in your browser (⌘D)")
             Spacer()
+            Button("Settings", systemImage: "gearshape", action: openSettingsWindow)
+                .keyboardShortcut(",")
+                .help("Open Settings (⌘,)")
             Button("Quit") { NSApp.terminate(nil) }
                 .keyboardShortcut("q")
         }
         .buttonStyle(.borderless)
+    }
+
+    // openSettings() creates its window asynchronously, and this LSUIElement app has no Dock icon
+    // to click for focus, so raise the window by hand a beat after asking for it.
+    private func openSettingsWindow() {
+        openSettings()
+        NSApp.activate(ignoringOtherApps: true)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            NSApp.activate(ignoringOtherApps: true)
+            let settingsWindow = NSApp.windows.first { $0.title == "Settings" } ?? NSApp.windows.last
+            settingsWindow?.makeKeyAndOrderFront(nil)
+        }
     }
 }
 
@@ -552,45 +664,68 @@ struct SummaryView: View {
     var onSelectItem: (StatsKind, String) -> Void = { _, _ in }
     var onSelectEvent: (Int) -> Void = { _ in }
 
+    @AppStorage(Prefs.Key.showKpis) private var showKpis = Prefs.Defaults.showSection
+    @AppStorage(Prefs.Key.showLatencyChart) private var showLatencyChart = Prefs.Defaults.showSection
+    @AppStorage(Prefs.Key.showBreakdown) private var showBreakdown = Prefs.Defaults.showSection
+    @AppStorage(Prefs.Key.showSlowest) private var showSlowest = Prefs.Defaults.showSection
+    @AppStorage(Prefs.Key.showTotalTime) private var showTotalTime = Prefs.Defaults.showSection
+    @AppStorage(Prefs.Key.showLiveFeed) private var showLiveFeed = Prefs.Defaults.showSection
+    @AppStorage(Prefs.Key.hideHookStartEvents) private var hideHookStartEvents = Prefs.Defaults.hideHookStartEvents
+    @AppStorage(Prefs.Key.hookWarnThresholdMs) private var hookWarnThresholdMs = Prefs.Defaults.hookWarnThresholdMs
+
     var body: some View {
         let k = summary.kpis
         VStack(alignment: .leading, spacing: 14) {
-            VStack(alignment: .leading, spacing: 6) {
-                HStack(alignment: .firstTextBaseline) {
-                    Kpi(title: "API p50", value: fmtMs(k.apiP50))
-                    Kpi(title: "API p95", value: fmtMs(k.apiP95))
-                    Kpi(title: "TTFT", value: k.ttftP50.map(fmtMs) ?? "–")
-                    Kpi(title: "Turn", value: fmtMs(k.turnP50))
+            if showKpis {
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(alignment: .firstTextBaseline) {
+                        Kpi(title: "API p50", value: fmtMs(k.apiP50))
+                        Kpi(title: "API p95", value: fmtMs(k.apiP95))
+                        Kpi(title: "TTFT", value: k.ttftP50.map(fmtMs) ?? "–")
+                        Kpi(title: "Turn", value: fmtMs(k.turnP50))
+                    }
+                    Text("\(k.costUsd, format: .currency(code: "USD")) · cache \(k.cacheHitRatio, format: .percent.precision(.fractionLength(0))) · \(k.sessions) sessions")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                        .contentTransition(.numericText())
                 }
-                Text("\(k.costUsd, format: .currency(code: "USD")) · cache \(k.cacheHitRatio, format: .percent.precision(.fractionLength(0))) · \(k.sessions) sessions")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .monospacedDigit()
-                    .contentTransition(.numericText())
             }
-            LatencyChart(points: summary.apiSeries.points)
-            Breakdown(breakdown: summary.breakdown)
-            KindStatsList(
-                title: "Slowest",
-                summary: summary,
-                storageKey: "slowestKind",
-                defaultKind: .hooks,
-                metric: \.p95,
-                value: { "p95 \(fmtMs($0.p95))" },
-                // Same threshold the collector uses for the "slow" state, which only watches hooks.
-                warn: { kind, row in kind == .hooks && row.p95 > 2000 },
-                onSelect: onSelectItem
-            )
-            KindStatsList(
-                title: "By total time",
-                summary: summary,
-                storageKey: "totalTimeKind",
-                defaultKind: .tools,
-                metric: \.totalMs,
-                value: { fmtMs($0.totalMs) },
-                onSelect: onSelectItem
-            )
-            LiveFeed(events: live.filter { $0.kind != "hook_start" }, onSelect: onSelectEvent)
+            if showLatencyChart {
+                LatencyChart(points: summary.apiSeries.points)
+            }
+            if showBreakdown {
+                Breakdown(breakdown: summary.breakdown)
+            }
+            if showSlowest {
+                KindStatsList(
+                    title: "Slowest",
+                    summary: summary,
+                    storageKey: "slowestKind",
+                    defaultKind: .hooks,
+                    metric: \.p95,
+                    value: { "p95 \(fmtMs($0.p95))" },
+                    // The collector's own "slow" state always uses a fixed 2000ms hook p95; this
+                    // threshold only controls the highlight in this list.
+                    warn: { kind, row in kind == .hooks && row.p95 > hookWarnThresholdMs },
+                    onSelect: onSelectItem,
+                    footnote: "Only affects this highlight. The collector's slow state uses a fixed rule."
+                )
+            }
+            if showTotalTime {
+                KindStatsList(
+                    title: "By total time",
+                    summary: summary,
+                    storageKey: "totalTimeKind",
+                    defaultKind: .tools,
+                    metric: \.totalMs,
+                    value: { fmtMs($0.totalMs) },
+                    onSelect: onSelectItem
+                )
+            }
+            if showLiveFeed {
+                LiveFeed(events: hideHookStartEvents ? live.filter { $0.kind != "hook_start" } : live, onSelect: onSelectEvent)
+            }
         }
     }
 }
@@ -809,7 +944,9 @@ struct KindStatsList: View {
     let value: (Stats) -> String
     let warn: (StatsKind, Stats) -> Bool
     let onSelect: (StatsKind, String) -> Void
+    let footnote: String?
     @AppStorage private var kind: StatsKind
+    @AppStorage(Prefs.Key.rowsPerList) private var rowsPerList = Prefs.Defaults.rowsPerList
 
     init(
         title: String,
@@ -819,7 +956,8 @@ struct KindStatsList: View {
         metric: @escaping (Stats) -> Double,
         value: @escaping (Stats) -> String,
         warn: @escaping (StatsKind, Stats) -> Bool = { _, _ in false },
-        onSelect: @escaping (StatsKind, String) -> Void = { _, _ in }
+        onSelect: @escaping (StatsKind, String) -> Void = { _, _ in },
+        footnote: String? = nil
     ) {
         self.title = title
         self.summary = summary
@@ -827,6 +965,7 @@ struct KindStatsList: View {
         self.value = value
         self.warn = warn
         self.onSelect = onSelect
+        self.footnote = footnote
         _kind = AppStorage(wrappedValue: defaultKind, storageKey)
     }
 
@@ -880,6 +1019,9 @@ struct KindStatsList: View {
                 }
             }
             .animation(panelAnimation(), value: kind)
+            if let footnote {
+                Text(footnote).font(.caption2).foregroundStyle(.tertiary)
+            }
         }
     }
 
@@ -893,7 +1035,7 @@ struct KindStatsList: View {
         case .hooks: hooks
         case .agents: agents
         }
-        return Array(picked.sorted { metric($0.1) > metric($1.1) }.prefix(3))
+        return Array(picked.sorted { metric($0.1) > metric($1.1) }.prefix(Prefs.clamp(rowsPerList, 3...15)))
     }
 }
 
@@ -901,13 +1043,14 @@ struct LiveFeed: View {
     // The whole feed, newest first. Ids are counted over all of it, then only the top rows show.
     let events: [LiveEvent]
     var onSelect: (Int) -> Void = { _ in }
+    @AppStorage(Prefs.Key.liveFeedLength) private var liveFeedLength = Prefs.Defaults.liveFeedLength
 
     var body: some View {
         if !events.isEmpty {
             VStack(alignment: .leading, spacing: 4) {
                 SectionTitle("Live")
                 let ids = rowIds(events.map { "\($0.tsMs)/\($0.sessionId ?? "")/\($0.kind)/\($0.label)" })
-                ForEach(Array(zip(ids, events).prefix(6)), id: \.0) { _, e in
+                ForEach(Array(zip(ids, events).prefix(Prefs.clamp(liveFeedLength, 5...50))), id: \.0) { _, e in
                     row(e)
                 }
             }
@@ -1411,5 +1554,9 @@ struct ClaudeTelemetryApp: App {
             MenuBarLabel(status: model.status)
         }
         .menuBarExtraStyle(.window)
+
+        Settings {
+            SettingsView(model: model)
+        }
     }
 }
