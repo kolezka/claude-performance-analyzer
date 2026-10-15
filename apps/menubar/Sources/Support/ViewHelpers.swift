@@ -53,3 +53,39 @@ struct HoverRow: ViewModifier {
 extension View {
     func hoverRow() -> some View { modifier(HoverRow()) }
 }
+
+// Reports the visible height of the screen that holds this view's window, and again whenever
+// the window moves to another screen or the screen layout changes.
+struct ScreenHeightReader: NSViewRepresentable {
+    let onChange: (CGFloat) -> Void
+
+    func makeNSView(context: Context) -> ReaderView {
+        let view = ReaderView()
+        view.onChange = onChange
+        return view
+    }
+
+    func updateNSView(_ nsView: ReaderView, context: Context) {
+        nsView.onChange = onChange
+    }
+
+    final class ReaderView: NSView {
+        var onChange: (CGFloat) -> Void = { _ in }
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            NotificationCenter.default.removeObserver(self)
+            guard let window else { return }
+            NotificationCenter.default.addObserver(
+                self, selector: #selector(report), name: NSWindow.didChangeScreenNotification, object: window)
+            NotificationCenter.default.addObserver(
+                self, selector: #selector(report), name: NSApplication.didChangeScreenParametersNotification, object: nil)
+            report()
+        }
+
+        @objc private func report() {
+            guard let height = window?.screen?.visibleFrame.height else { return }
+            onChange(height)
+        }
+    }
+}

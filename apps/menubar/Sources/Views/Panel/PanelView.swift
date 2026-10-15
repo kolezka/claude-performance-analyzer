@@ -10,15 +10,28 @@ struct PanelView: View {
     @AppStorage(Prefs.Key.panelWidth) private var panelWidth = Prefs.Defaults.panelWidth
     @AppStorage(Prefs.Key.keepDetailOpen) private var keepDetailOpen = Prefs.Defaults.keepDetailOpen
     @AppStorage(Prefs.Key.enabledWindows) private var enabledWindowsRaw = Prefs.Defaults.enabledWindowsRaw
+    @State private var contentHeight: CGFloat = 0
+    @State private var headerHeight: CGFloat = 0
+    @State private var footerHeight: CGFloat = 0
+    @State private var screenHeight: CGFloat?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            header
-            content
+            header.onGeometryChange(for: CGFloat.self) { $0.size.height } action: { headerHeight = $0 }
+            // A ScrollView has no height of its own here, so it gets the measured content height,
+            // capped so the panel never runs past the bottom of the screen.
+            ScrollView {
+                content
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { contentHeight = $0 }
+            }
+            .scrollBounceBehavior(.basedOnSize)
+            .frame(height: min(contentHeight, maxContentHeight))
             Divider()
-            footer
+            footer.onGeometryChange(for: CGFloat.self) { $0.size.height } action: { footerHeight = $0 }
         }
         .padding(14)
+        .background(ScreenHeightReader { screenHeight = $0 })
         // An overlay takes the panel's size, so the card gets a fixed height to scroll in.
         .overlay { DetailOverlay(model: model, stack: $detailStack) }
         .frame(width: CGFloat(panelWidth))
@@ -61,6 +74,13 @@ struct PanelView: View {
             .labelsHidden()
             .fixedSize()
         }
+    }
+
+    // Uses the screen the panel is on. Its visibleFrame already excludes the menu bar and the Dock.
+    // The rest is padding, the three stack gaps, the divider and a small margin under the panel.
+    private var maxContentHeight: CGFloat {
+        let available = screenHeight ?? NSScreen.main?.visibleFrame.height ?? 800
+        return max(200, available - headerHeight - footerHeight - 28 - 42 - 1 - 16)
     }
 
     // "ok" covers any API request in the last 15 minutes, which is too long to call live.
