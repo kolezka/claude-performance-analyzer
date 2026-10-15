@@ -2,6 +2,7 @@
 set -euo pipefail
 
 APP_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+COLLECTOR_ROOT="$APP_ROOT/../collector"
 BUILD_DIR="$APP_ROOT/build"
 APP_DIR="$BUILD_DIR/ClaudeTelemetry.app"
 CONTENTS_DIR="$APP_DIR/Contents"
@@ -29,6 +30,18 @@ done
 lipo -create "$BUILD_DIR"/ClaudeTelemetry-arm64 "$BUILD_DIR"/ClaudeTelemetry-x86_64 -output "$MACOS_DIR/ClaudeTelemetry"
 rm "$BUILD_DIR"/ClaudeTelemetry-arm64 "$BUILD_DIR"/ClaudeTelemetry-x86_64
 
+# The collector ships inside the app as a standalone binary, so users need neither Bun nor the repo.
+COLLECTOR_BIN="$MACOS_DIR/claude-telemetry-collector"
+for target in arm64 x64; do
+    bun "$COLLECTOR_ROOT/scripts/compile.ts" "bun-darwin-$target" "$BUILD_DIR/collector-$target"
+done
+lipo -create "$BUILD_DIR"/collector-arm64 "$BUILD_DIR"/collector-x64 -output "$COLLECTOR_BIN"
+rm "$BUILD_DIR"/collector-arm64 "$BUILD_DIR"/collector-x64
+
+# SMAppService looks for the agent's plist here.
+mkdir -p "$CONTENTS_DIR/Library/LaunchAgents"
+cp "$APP_ROOT/Resources/pl.raqz.claude-telemetry.collector.plist" "$CONTENTS_DIR/Library/LaunchAgents/"
+
 cp "$APP_ROOT/Resources/Info.plist" "$CONTENTS_DIR/Info.plist"
 # Release builds take the version from the git tag, not from the checked-in plist.
 if [[ -n "${APP_VERSION:-}" ]]; then
@@ -49,9 +62,13 @@ rm "$BUILD_DIR/icon-partial.plist"
 
 # Ad-hoc by default. Set SIGN_IDENTITY to a Developer ID for a release build.
 SIGN_IDENTITY="${SIGN_IDENTITY:--}"
+# The collector is signed first, since signing the app seals its nested code as it is.
 if [[ "$SIGN_IDENTITY" == "-" ]]; then
+    codesign --force --sign - "$COLLECTOR_BIN"
     codesign --force --sign - "$APP_DIR"
 else
+    codesign --force --options runtime --timestamp --entitlements "$APP_ROOT/Resources/Collector.entitlements" \
+        --sign "$SIGN_IDENTITY" "$COLLECTOR_BIN"
     codesign --force --options runtime --timestamp --sign "$SIGN_IDENTITY" "$APP_DIR"
 fi
 

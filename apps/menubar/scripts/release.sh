@@ -95,5 +95,5 @@ if [[ "$(remote_tag_commit)" != "$HEAD_SHA" ]]; then
     exit 1
 fi
 gh release create "$TAG" "$DMG" --verify-tag --title "ClaudeTelemetry $APP_VERSION" \
-    --notes "The menu bar app reads data from the local collector. Clone this repository and run \`bun run start\` before opening the app." \
+    --notes "Drag ClaudeTelemetry to Applications and open it. The app starts its bundled collector in the background, so Bun and this repository are not needed." \
     --generate-notes

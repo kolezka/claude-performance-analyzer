@@ -29,6 +29,14 @@ jobs:
           fetch-depth: 0
           fetch-tags: true
 
+      # v2.2.0, pinned by SHA like checkout. Bun compiles the collector that ships inside the app.
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
+        with:
+          bun-version: 1.4.2
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
       - name: Compute next version
         env:
           BUMP: ${{ inputs.bump }}

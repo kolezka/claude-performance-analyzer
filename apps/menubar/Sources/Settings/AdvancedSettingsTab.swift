@@ -27,9 +27,17 @@ struct AdvancedSettingsTab: View {
     }
 
     // Launch at login is off by default, so a full reset also removes the login item.
+    // The bundled collector is on by default, so a reset starts it again.
     private func resetAll() {
         model.resetAllSettings()
         resetError = nil
+        Task {
+            do {
+                try await CollectorAgent.start()
+            } catch {
+                resetError = "Settings reset, but the collector did not start: \(error.localizedDescription)"
+            }
+        }
         guard SMAppService.mainApp.status == .enabled else { return }
         do {
             try SMAppService.mainApp.unregister()

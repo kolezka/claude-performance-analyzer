@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>pl.raqz.claude-telemetry.collector</string>
+    <key>BundleProgram</key>
+    <string>Contents/MacOS/claude-telemetry-collector</string>
+    <key>AssociatedBundleIdentifiers</key>
+    <array>
+        <string>pl.raqz.claude-telemetry</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <!-- Restart after a crash. -->
+    <key>KeepAlive</key>
+    <dict>
+        <key>SuccessfulExit</key>
+        <false/>
+    </dict>
+    <!-- Wait for a port held by another collector instead of failing. -->
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>CC_WAIT_FOR_PORT</key>
+        <string>1</string>
+    </dict>
+</dict>
+</plist>

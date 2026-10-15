@@ -28,6 +28,9 @@ enum Prefs {
         static let hideHookStartEvents = "hideHookStartEvents"
         static let hookWarnThresholdMs = "hookWarnThresholdMs"
         static let animationsMode = "animationsMode"
+        static let runCollector = "runCollector"
+        // Not a setting: the build and path the collector agent was last registered from.
+        static let collectorRegistration = "collectorRegistration"
 
         // Everything "Reset All Settings" clears. "window" is included since it is the General
         // tab's default time window, just under its original pre-Settings name.
@@ -36,7 +39,7 @@ enum Prefs {
             retryDelaySec, enabledWindows, keepDetailOpen, labelStyle, labelValue, offlineText, bounceIconOnSlow,
             panelWidth, showKpis, showLatencyChart, showBreakdown, showSlowest, showTotalTime,
             showLiveFeed, rowsPerList, liveFeedLength, hideHookStartEvents, hookWarnThresholdMs,
-            animationsMode,
+            animationsMode, runCollector,
             // Kind pickers inside the panel's two lists, persisted since before Settings existed.
             "slowestKind", "totalTimeKind",
         ]
@@ -58,6 +61,7 @@ enum Prefs {
         static let liveFeedLength = 6
         static let hideHookStartEvents = true
         static let hookWarnThresholdMs = 2000.0
+        static let runCollector = true
     }
 
     static func clamp<T: Comparable>(_ value: T, _ range: ClosedRange<T>) -> T {

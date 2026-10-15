@@ -42,6 +42,19 @@ test("accepts http/protobuf, plain and gzipped", async () => {
   expect(live[0]).toMatchObject({ kind: "tool", ms: 812, sessionId: "pb-1" });
 });
 
+// The feed carries session ids and labels, so another site open in the browser must not read it.
+test("WebSocket refuses other origins and hosts", async () => {
+  const opens = (headers: Record<string, string>) =>
+    new Promise<boolean>((resolve) => {
+      const ws = new WebSocket(`ws://127.0.0.1:${collector.port}/ws`, { headers } as any);
+      ws.onopen = () => (ws.close(), resolve(true));
+      ws.onerror = () => resolve(false);
+    });
+  expect(await opens({ origin: "https://evil.example" })).toBe(false);
+  expect(await opens({ host: `evil.example:${collector.port}` })).toBe(false);
+  expect(await opens({ origin: collector.url })).toBe(true);
+});
+
 test("ingested logs are pushed to WebSocket clients and kept in the live backlog", async () => {
   const ws = new WebSocket(`ws://127.0.0.1:${collector.port}/ws`);
   await new Promise((resolve, reject) => ((ws.onopen = resolve), (ws.onerror = reject)));
