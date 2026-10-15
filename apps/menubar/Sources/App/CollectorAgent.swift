@@ -69,8 +69,13 @@ enum CollectorAgent {
     static func repairIfSilent() async throws {
         guard isWanted, isBundled, service.status == .enabled else { return }
         let probe = URL(string: "api/live", relativeTo: Prefs.defaultCollectorURL)!
+        // A short timeout keeps a port owner that never answers from stretching the 15 tries.
+        let config = URLSessionConfiguration.ephemeral
+        config.timeoutIntervalForRequest = 1
+        config.timeoutIntervalForResource = 1
+        let session = URLSession(configuration: config)
         for _ in 0..<15 {
-            if let (_, response) = try? await URLSession.shared.data(from: probe),
+            if let (_, response) = try? await session.data(from: probe),
                (response as? HTTPURLResponse)?.statusCode == 200 {
                 return
             }
@@ -78,8 +83,13 @@ enum CollectorAgent {
         }
         try await serialized {
             guard isWanted, service.status == .enabled else { return }
-            try await service.unregister()
-            try service.register()
+            do {
+                try await service.unregister()
+                try service.register()
+            } catch {
+                lastError = error.localizedDescription
+                throw error
+            }
         }
     }
 
