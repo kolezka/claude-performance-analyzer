@@ -170,16 +170,7 @@ struct PanelView: View {
         .buttonStyle(.borderless)
     }
 
-    // openSettings() creates its window asynchronously, and this LSUIElement app has no Dock icon
-    // to click for focus, so raise the window by hand a beat after asking for it.
     private func openSettingsWindow() {
-        openSettings()
-        NSApp.activate(ignoringOtherApps: true)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-            NSApp.activate(ignoringOtherApps: true)
-            // Match by identifier: the title follows the selected tab, and a fallback could raise the panel.
-            let settingsWindow = NSApp.windows.first { $0.identifier?.rawValue.contains("Settings") == true }
-            settingsWindow?.makeKeyAndOrderFront(nil)
-        }
+        showSettingsWindow(using: openSettings)
     }
 }

@@ -26,6 +26,7 @@ struct MenuBarLabel: View {
     @AppStorage(Prefs.Key.labelValue) private var labelValueRaw = Prefs.LabelValue.apiP50.rawValue
     @AppStorage(Prefs.Key.offlineText) private var offlineTextRaw = Prefs.OfflineText.off.rawValue
     @AppStorage(Prefs.Key.bounceIconOnSlow) private var bounceOnSlow = Prefs.Defaults.bounceIconOnSlow
+    @Environment(\.openSettings) private var openSettings
 
     var body: some View {
         // MenuBarExtra draws the label as a template, so "slow" swaps the symbol instead of tinting.
@@ -48,6 +49,8 @@ struct MenuBarLabel: View {
             }
         }
         .accessibilityLabel("Claude Code telemetry")
+        // The label exists from launch, unlike the panel, so it hands the menu its settings opener.
+        .onAppear { StatusItemMenu.shared.install(openSettings: openSettings) }
     }
 
     // Idle and older collectors only have the server label. A value with no data yet (TTFT before
