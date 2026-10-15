@@ -3,12 +3,10 @@ import SwiftUI
 
 struct PanelView: View {
     @Bindable var model: Telemetry
-    // Overlay navigation stack: empty closes it, one entry shows a detail, two lets "back" return
-    // from a recent call's event detail to the aggregate that opened it.
-    @State private var detailStack: [DetailRoute] = []
     @Environment(\.openSettings) private var openSettings
+    @Environment(\.openWindow) private var openWindow
     @AppStorage(Prefs.Key.panelWidth) private var panelWidth = Prefs.Defaults.panelWidth
-    @AppStorage(Prefs.Key.keepDetailOpen) private var keepDetailOpen = Prefs.Defaults.keepDetailOpen
+    @AppStorage(Prefs.Key.showWaterfall) private var showWaterfall = Prefs.Defaults.showSection
     @AppStorage(Prefs.Key.enabledWindows) private var enabledWindowsRaw = Prefs.Defaults.enabledWindowsRaw
     @State private var contentHeight: CGFloat = 0
     @State private var headerHeight: CGFloat = 0
@@ -32,14 +30,16 @@ struct PanelView: View {
         }
         .padding(14)
         .background(ScreenHeightReader { screenHeight = $0 })
-        // An overlay takes the panel's size, so the card gets a fixed height to scroll in.
-        .overlay { DetailOverlay(model: model, stack: $detailStack) }
         .frame(width: CGFloat(panelWidth))
         .onAppear { model.panelOpen = true }
-        .onDisappear {
-            model.panelOpen = false
-            if !keepDetailOpen { detailStack = [] }
-        }
+        .onDisappear { model.panelOpen = false }
+    }
+
+    // Opens or refocuses the Details window on the given route, the same way the status-item
+    // menu raises Settings: the window is created async, so it gets activated a beat later too.
+    private func openDetail(_ route: DetailRoute) {
+        model.navigator.open(route)
+        showDetailsWindow(using: openWindow)
     }
 
     private var header: some View {
@@ -126,16 +126,21 @@ struct PanelView: View {
                     )
                     .id("empty")
                 } else {
-                    SummaryView(
-                        summary: s,
-                        live: model.live,
-                        onSelectItem: { kind, name in
-                            withAnimation(panelAnimation()) { detailStack = [.item(kind: kind, name: name)] }
-                        },
-                        onSelectEvent: { id in
-                            withAnimation(panelAnimation()) { detailStack = [.event(id: id)] }
+                    VStack(alignment: .leading, spacing: 14) {
+                        SummaryView(
+                            summary: s,
+                            live: model.live,
+                            onSelectItem: { kind, name in openDetail(.item(kind: kind, name: name)) },
+                            onSelectEvent: { id in openDetail(.event(id: id)) }
+                        )
+                        if showWaterfall {
+                            TurnSection(
+                                model: model,
+                                onSelectEvent: { id in openDetail(.event(id: id)) },
+                                onOpenTurn: { promptId in openDetail(.turn(promptId: promptId)) }
+                            )
                         }
-                    )
+                    }
                     .id("summary")
                 }
             } else if let error = model.summaryError {

@@ -23,6 +23,12 @@ struct ClaudeTelemetryApp: App {
         }
         .menuBarExtraStyle(.window)
 
+        Window("Details", id: "details") {
+            DetailWindowView(model: model)
+        }
+        .defaultSize(width: 620, height: 760)
+        .windowResizability(.contentMinSize)
+
         Settings {
             SettingsView(model: model)
         }

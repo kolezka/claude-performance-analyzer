@@ -51,3 +51,16 @@ func showSettingsWindow(using openSettings: OpenSettingsAction) {
         settingsWindow?.makeKeyAndOrderFront(nil)
     }
 }
+
+// Same reasoning as showSettingsWindow: openWindow(id:) creates the window asynchronously,
+// and this LSUIElement app has no Dock icon to click for focus.
+@MainActor
+func showDetailsWindow(using openWindow: OpenWindowAction) {
+    openWindow(id: "details")
+    NSApp.activate(ignoringOtherApps: true)
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+        NSApp.activate(ignoringOtherApps: true)
+        let detailsWindow = NSApp.windows.first { $0.identifier?.rawValue.contains("details") == true }
+        detailsWindow?.makeKeyAndOrderFront(nil)
+    }
+}

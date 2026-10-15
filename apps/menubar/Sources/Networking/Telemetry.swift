@@ -4,14 +4,39 @@ import SwiftUI
 @MainActor
 @Observable
 final class Telemetry {
+    enum TurnsSort: String { case recent, slowest }
+
     var status: Status?
     var summary: Summary?
     var summaryError: String?
     var live: [LiveEvent] = []
     var updatedAt: Date?
+    // Navigation for the Details window. Owned here, not the window, so a panel click can
+    // set a route before the window even exists yet.
+    var navigator = DetailNavigator()
     var panelOpen = false {
         didSet { if panelOpen != oldValue { restartPanelPolling() } }
     }
+
+    // Panel "Turn" section state. selectedPromptId nil means "follow the newest turn";
+    // once the user steps back it pins to that turn's id so a new arrival doesn't bump it.
+    var turnsSort = TurnsSort.recent {
+        didSet {
+            guard turnsSort != oldValue else { return }
+            selectedPromptId = nil
+            refreshTurns()
+        }
+    }
+    var turns: [TurnSummary] = []
+    var turnsError: String?
+    var selectedPromptId: String? {
+        didSet {
+            guard selectedPromptId != oldValue else { return }
+            refreshSelectedTurn()
+        }
+    }
+    var turnDetail: TurnDetail?
+    var turnDetailError: String?
     var minutes = UserDefaults.standard.object(forKey: Prefs.Key.window) as? Int ?? Prefs.Defaults.minutes {
         didSet {
             UserDefaults.standard.set(minutes, forKey: Prefs.Key.window)
@@ -70,6 +95,8 @@ final class Telemetry {
     @ObservationIgnored private var session: URLSession = Telemetry.makeSession(requestTimeout: Prefs.loadRequestTimeout())
     @ObservationIgnored private var panelTask: Task<Void, Never>?
     @ObservationIgnored private var statusTask: Task<Void, Never>?
+    @ObservationIgnored private var turnsTask: Task<Void, Never>?
+    @ObservationIgnored private var turnTask: Task<Void, Never>?
 
     init() {
         restartStatusPolling()
@@ -153,11 +180,62 @@ final class Telemetry {
                 live = newLive ?? live
             }
             updatedAt = .now
+            // Rides the same poll tick as summary/live, so opening the panel's Turn section
+            // never starts a second loop. Fire-and-forget: it manages its own task so a slow
+            // response here can never block or be outraced by the next poll tick.
+            refreshTurns()
             return true
         } catch {
             guard !Task.isCancelled else { return true }
             withAnimation(panelAnimation()) { summaryError = error.localizedDescription }
             return false
+        }
+    }
+
+    // One turns-list request in flight at a time: a sort switch or the next poll tick cancels
+    // whatever was still running. The sort/minutes are captured at request time and re-checked
+    // against the live properties on completion, so even an uncancelled-but-superseded response
+    // (e.g. two ticks landing out of order) can't overwrite newer state.
+    private func refreshTurns() {
+        turnsTask?.cancel()
+        let sort = turnsSort
+        let windowMinutes = minutes
+        turnsTask = Task {
+            // Reads the same key the Item detail toggle writes, so both views agree on
+            // whether headless SDK sessions are in the numbers.
+            let excludeHeadless = UserDefaults.standard.bool(forKey: Prefs.Key.hideHeadlessSessions)
+            do {
+                let list: [TurnSummary] = try await fetchTurns(sort: sort, limit: 20, excludeHeadless: excludeHeadless)
+                guard !Task.isCancelled, sort == turnsSort, windowMinutes == minutes else { return }
+                withAnimation(panelAnimation()) { turns = list; turnsError = nil }
+                refreshSelectedTurn()
+            } catch {
+                guard !Task.isCancelled, sort == turnsSort, windowMinutes == minutes else { return }
+                turnsError = error.localizedDescription
+            }
+        }
+    }
+
+    // Same one-in-flight-at-a-time shape as refreshTurns. nil pins to "follow the newest in
+    // the list"; a pinned id that is no longer in `turns` (aged out) still gets fetched by id,
+    // so the panel keeps showing that turn instead of silently snapping to turns.first.
+    private func refreshSelectedTurn() {
+        turnTask?.cancel()
+        guard let promptId = selectedPromptId ?? turns.first?.promptId else {
+            turnTask = nil
+            turnDetail = nil
+            turnDetailError = nil
+            return
+        }
+        turnTask = Task {
+            do {
+                let detail = try await fetchTurn(promptId: promptId)
+                guard !Task.isCancelled, (selectedPromptId ?? turns.first?.promptId) == promptId else { return }
+                withAnimation(panelAnimation()) { turnDetail = detail; turnDetailError = nil }
+            } catch {
+                guard !Task.isCancelled, (selectedPromptId ?? turns.first?.promptId) == promptId else { return }
+                turnDetailError = error.localizedDescription
+            }
         }
     }
 
@@ -173,14 +251,35 @@ final class Telemetry {
         try await get("api/event?id=\(id)")
     }
 
-    func fetchItem(kind: StatsKind, name: String) async throws -> ItemDetail {
+    func fetchItem(kind: StatsKind, name: String, excludeHeadless: Bool) async throws -> ItemDetail {
         var components = URLComponents()
         components.path = "api/item"
         components.queryItems = [
             URLQueryItem(name: "kind", value: kind.rawValue),
             URLQueryItem(name: "name", value: name),
             URLQueryItem(name: "minutes", value: String(minutes)),
+            URLQueryItem(name: "excludeHeadless", value: excludeHeadless ? "1" : "0"),
         ]
+        return try await get(components.string!)
+    }
+
+    func fetchTurns(sort: TurnsSort, limit: Int, excludeHeadless: Bool) async throws -> [TurnSummary] {
+        var components = URLComponents()
+        components.path = "api/turns"
+        components.queryItems = [
+            URLQueryItem(name: "minutes", value: String(minutes)),
+            URLQueryItem(name: "sort", value: sort.rawValue),
+            URLQueryItem(name: "limit", value: String(limit)),
+            URLQueryItem(name: "excludeHeadless", value: excludeHeadless ? "1" : "0"),
+        ]
+        return try await get(components.string!)
+    }
+
+    // May come back nil: the collector returns JSON null when the prompt has no events.
+    func fetchTurn(promptId: String) async throws -> TurnDetail? {
+        var components = URLComponents()
+        components.path = "api/turn"
+        components.queryItems = [URLQueryItem(name: "prompt", value: promptId)]
         return try await get(components.string!)
     }
 

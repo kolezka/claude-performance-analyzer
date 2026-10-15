@@ -15,6 +15,7 @@ export function openStore(path: string) {
     trace_id TEXT, span_id TEXT, parent_id TEXT, name TEXT NOT NULL,
     start_ms INTEGER NOT NULL, end_ms INTEGER NOT NULL, session_id TEXT, attrs TEXT NOT NULL)`);
   db.run("CREATE INDEX IF NOT EXISTS spans_start ON spans (start_ms)");
+  db.run("CREATE INDEX IF NOT EXISTS spans_session ON spans (session_id, start_ms)");
   db.run(`CREATE TABLE IF NOT EXISTS metrics (
     ts_ms INTEGER NOT NULL, name TEXT NOT NULL, session_id TEXT, value REAL NOT NULL, attrs TEXT NOT NULL)`);
   db.run("CREATE INDEX IF NOT EXISTS metrics_ts ON metrics (ts_ms)");
@@ -44,6 +45,17 @@ export function openStore(path: string) {
   });
   const EVENT_COLUMNS = "rowid AS id, ts_ms, name, session_id, prompt_id, attrs";
 
+  const spanRow = (r: any): SpanRow => ({
+    traceId: r.trace_id,
+    spanId: r.span_id,
+    parentId: r.parent_id,
+    name: r.name,
+    startMs: r.start_ms,
+    endMs: r.end_ms,
+    sessionId: r.session_id,
+    attrs: JSON.parse(r.attrs),
+  });
+
   return {
     db,
     addEvents,
@@ -61,6 +73,26 @@ export function openStore(path: string) {
       return db
         .query(`SELECT ${EVENT_COLUMNS} FROM events WHERE ts_ms >= ? AND name = ? ORDER BY ts_ms`)
         .all(sinceMs, name)
+        .map(eventRow);
+    },
+    // hook_execution_complete rows whose hook label (hook_name, falling back to hook_event,
+    // falling back to "unknown") equals `label`, matching hookLabel()'s own fallback exactly.
+    // Every hook type shares the "hook_execution_complete" event name, so a 24h window can hold
+    // many times more rows than match one label; json_extract() rejects the rest in SQLite
+    // itself; a row that is not the label we want is never even JSON.parse'd into a JS object.
+    hookEventsByLabel(sinceMs: number, label: string): EventRow[] {
+      return db
+        .query(
+          `SELECT ${EVENT_COLUMNS} FROM events
+           WHERE ts_ms >= ? AND name = 'hook_execution_complete'
+           AND (
+             json_extract(attrs, '$.hook_name') = ?
+             OR (json_extract(attrs, '$.hook_name') IS NULL AND json_extract(attrs, '$.hook_event') = ?)
+             OR (json_extract(attrs, '$.hook_name') IS NULL AND json_extract(attrs, '$.hook_event') IS NULL AND ? = 'unknown')
+           )
+           ORDER BY ts_ms`,
+        )
+        .all(sinceMs, label, label, label)
         .map(eventRow);
     },
     // Most recent prompt when no id is given.
@@ -94,20 +126,27 @@ export function openStore(path: string) {
         .all(sessionId, ...names)
         .map(eventRow);
     },
-    spans(sinceMs: number): SpanRow[] {
+    // One event name across several sessions, no time filter: hook_registered fires once at
+    // session start, which can be well before the window an /api/item query is asking about.
+    eventsByNameForSessions(name: string, sessionIds: string[]): EventRow[] {
+      if (sessionIds.length === 0) return [];
+      const placeholders = sessionIds.map(() => "?").join(",");
       return db
-        .query("SELECT * FROM spans WHERE start_ms >= ? ORDER BY start_ms")
-        .all(sinceMs)
-        .map((r: any) => ({
-          traceId: r.trace_id,
-          spanId: r.span_id,
-          parentId: r.parent_id,
-          name: r.name,
-          startMs: r.start_ms,
-          endMs: r.end_ms,
-          sessionId: r.session_id,
-          attrs: JSON.parse(r.attrs),
-        }));
+        .query(`SELECT ${EVENT_COLUMNS} FROM events WHERE name = ? AND session_id IN (${placeholders}) ORDER BY ts_ms`)
+        .all(name, ...sessionIds)
+        .map(eventRow);
+    },
+    spans(sinceMs: number): SpanRow[] {
+      return db.query("SELECT * FROM spans WHERE start_ms >= ? ORDER BY start_ms").all(sinceMs).map(spanRow);
+    },
+    // A turn's own spans: tool and llm_request spans carry the agent_id that groups a turn's
+    // rows into lanes. Padded past the turn's own bounds, since a span's clock can lag or lead
+    // the log event it correlates with by a little.
+    spansForSession(sessionId: string, sinceMs: number, untilMs: number): SpanRow[] {
+      return db
+        .query("SELECT * FROM spans WHERE session_id = ? AND start_ms >= ? AND start_ms <= ? ORDER BY start_ms")
+        .all(sessionId, sinceMs, untilMs)
+        .map(spanRow);
     },
     prune(olderThanMs: number) {
       db.run("DELETE FROM events WHERE ts_ms < ?", [olderThanMs]);

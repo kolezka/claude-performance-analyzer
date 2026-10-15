@@ -8,6 +8,7 @@ struct PanelSettingsTab: View {
     @AppStorage(Prefs.Key.showSlowest) private var showSlowest = Prefs.Defaults.showSection
     @AppStorage(Prefs.Key.showTotalTime) private var showTotalTime = Prefs.Defaults.showSection
     @AppStorage(Prefs.Key.showLiveFeed) private var showLiveFeed = Prefs.Defaults.showSection
+    @AppStorage(Prefs.Key.showWaterfall) private var showWaterfall = Prefs.Defaults.showSection
     @AppStorage(Prefs.Key.rowsPerList) private var rowsPerList = Prefs.Defaults.rowsPerList
     @AppStorage(Prefs.Key.liveFeedLength) private var liveFeedLength = Prefs.Defaults.liveFeedLength
     @AppStorage(Prefs.Key.hideHookStartEvents) private var hideHookStartEvents = Prefs.Defaults.hideHookStartEvents
@@ -30,6 +31,7 @@ struct PanelSettingsTab: View {
                 Toggle("Slowest", isOn: $showSlowest)
                 Toggle("By total time", isOn: $showTotalTime)
                 Toggle("Live feed", isOn: $showLiveFeed)
+                Toggle("Turn waterfall", isOn: $showWaterfall)
             }
             Section("Lists") {
                 Stepper(value: $rowsPerList, in: 3...8) {

@@ -7,6 +7,18 @@ import { gitRoot, type RepoInfo } from "./repos";
 // merged onto every row of a batch, so restricting to these still sees them.
 export const SESSION_EVENT_NAMES = ["user_prompt", "api_request", "tool_result"];
 
+export interface RepoSample {
+  tsMs: number;
+  promptId: string | null;
+  repo: RepoInfo;
+}
+
+export interface BranchSample {
+  tsMs: number;
+  promptId: string | null;
+  branch: string;
+}
+
 export interface SessionInfo {
   sessionId: string;
   repo: RepoInfo | null;
@@ -20,6 +32,50 @@ export interface SessionInfo {
   lastMs: number;
   prompts: number;
   costUsd: number;
+  kind: "interactive" | "headless";
+  kindLabel: string;
+  // Ascending by tsMs: every tool call's own repo and every branch signal seen, so a call's
+  // folder/branch can be resolved "as of" its own moment instead of the session-wide dominant
+  // one (a long session can move between repos and branches over its life).
+  repoTimeline: RepoSample[];
+  branchTimeline: BranchSample[];
+}
+
+function lastAtOrBefore<T extends { tsMs: number }>(samples: T[], tsMs: number): T | null {
+  let lo = 0;
+  let hi = samples.length - 1;
+  let found: T | null = null;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    if (samples[mid]!.tsMs <= tsMs) {
+      found = samples[mid]!;
+      lo = mid + 1;
+    } else {
+      hi = mid - 1;
+    }
+  }
+  return found;
+}
+
+// A sample's value "as of" a moment: the latest one at or before it, else the first one after
+// it for the same prompt (the call ran before the session's first touch, but something in its
+// own turn later reveals where that turn was), else null (caller falls back to the session-wide
+// dominant value).
+function sampleAsOf<T extends { tsMs: number; promptId: string | null }>(samples: T[], tsMs: number, promptId: string | null): T | null {
+  const before = lastAtOrBefore(samples, tsMs);
+  if (before) return before;
+  for (const s of samples) {
+    if (s.tsMs > tsMs && s.promptId === promptId) return s;
+  }
+  return null;
+}
+
+export function repoAsOf(info: SessionInfo, tsMs: number, promptId: string | null): RepoInfo | null {
+  return sampleAsOf(info.repoTimeline, tsMs, promptId)?.repo ?? info.repo;
+}
+
+export function branchAsOf(info: SessionInfo, tsMs: number, promptId: string | null): string | null {
+  return sampleAsOf(info.branchTimeline, tsMs, promptId)?.branch ?? info.branch;
 }
 
 function num(v: unknown): number {
@@ -54,6 +110,12 @@ export function buildSessionInfo(sessionId: string, events: EventRow[], home: st
   let lastMs = -Infinity;
   let prompts = 0;
   let costUsd = 0;
+  const querySources = new Set<string>();
+  let sawNonInteractiveTerminal = false;
+  // events is ts_ms-ordered (the SQL query guarantees it), so both timelines come out sorted
+  // for free just by pushing in loop order.
+  const repoTimeline: RepoSample[] = [];
+  const branchTimeline: BranchSample[] = [];
 
   for (const e of events) {
     firstMs = Math.min(firstMs, e.tsMs);
@@ -61,11 +123,15 @@ export function buildSessionInfo(sessionId: string, events: EventRow[], home: st
     const a = e.attrs;
     if (!terminal && typeof a["terminal.type"] === "string") terminal = a["terminal.type"];
     if (!claudeVersion && typeof a["service.version"] === "string") claudeVersion = a["service.version"];
+    if (a["terminal.type"] === "non-interactive") sawNonInteractiveTerminal = true;
 
     const headBranch = a["vcs.ref.head.name"];
-    if (typeof headBranch === "string" && e.tsMs >= branchMs) {
-      branch = headBranch;
-      branchMs = e.tsMs;
+    if (typeof headBranch === "string") {
+      branchTimeline.push({ tsMs: e.tsMs, promptId: e.promptId, branch: headBranch });
+      if (e.tsMs >= branchMs) {
+        branch = headBranch;
+        branchMs = e.tsMs;
+      }
     }
 
     if (e.name === "user_prompt") prompts++;
@@ -73,17 +139,25 @@ export function buildSessionInfo(sessionId: string, events: EventRow[], home: st
     if (e.name === "api_request") {
       if (typeof a.model === "string") models.add(a.model);
       costUsd += num(a.cost_usd);
+      if (typeof a.query_source === "string") querySources.add(a.query_source);
     }
 
     if (e.name === "tool_result") {
       const paramBranch = gitBranchFromToolParams(a);
-      if (paramBranch && e.tsMs >= branchMs) {
-        branch = paramBranch;
-        branchMs = e.tsMs;
+      if (paramBranch) {
+        branchTimeline.push({ tsMs: e.tsMs, promptId: e.promptId, branch: paramBranch });
+        if (e.tsMs >= branchMs) {
+          branch = paramBranch;
+          branchMs = e.tsMs;
+        }
       }
+      // The first path that resolves to a repo wins the sample, same rule repoForEvent uses
+      // for a single call; every resolved path still counts toward the all-time dominant vote.
+      let sampleRepo: RepoInfo | null = null;
       for (const p of extractPaths(a, home)) {
         const repo = gitRoot(p);
         if (!repo) continue;
+        if (!sampleRepo) sampleRepo = repo;
         const hit = rootHits.get(repo.root);
         if (hit) {
           hit.count++;
@@ -92,11 +166,24 @@ export function buildSessionInfo(sessionId: string, events: EventRow[], home: st
           rootHits.set(repo.root, { repo, count: 1, lastMs: e.tsMs });
         }
       }
+      if (sampleRepo) repoTimeline.push({ tsMs: e.tsMs, promptId: e.promptId, repo: sampleRepo });
     }
   }
 
   const ranked = [...rootHits.values()].sort((x, y) => y.count - x.count || y.lastMs - x.lastMs);
   const top = ranked[0] ?? null;
+  const modelsArr = [...models];
+
+  // Interactive: at least one api_request came from the REPL's own thread. Headless: an "sdk"
+  // query source with no REPL thread (claude -p spawned by a plugin), or a non-interactive
+  // terminal. Default to interactive when there is no evidence either way.
+  const kind: SessionInfo["kind"] = querySources.has("repl_main_thread")
+    ? "interactive"
+    : querySources.has("sdk") || sawNonInteractiveTerminal
+      ? "headless"
+      : "interactive";
+  const kindLabel =
+    kind === "interactive" ? (terminal ? `Interactive · ${terminal}` : "Interactive") : modelsArr.length ? `Headless (SDK) · ${modelsArr[0]}` : "Headless (SDK)";
 
   return {
     sessionId,
@@ -106,10 +193,14 @@ export function buildSessionInfo(sessionId: string, events: EventRow[], home: st
     branch,
     terminal,
     claudeVersion,
-    models: [...models],
+    models: modelsArr,
     firstMs,
     lastMs,
     prompts,
     costUsd,
+    kind,
+    kindLabel,
+    repoTimeline,
+    branchTimeline,
   };
 }

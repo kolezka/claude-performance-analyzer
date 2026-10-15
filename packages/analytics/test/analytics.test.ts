@@ -75,7 +75,10 @@ test("summarize ranks hooks and tools by total time and splits turn time", () =>
   expect(out.breakdown).toEqual({ api: 4000, tools: 840, hooks: 4200 });
   expect(out.kpis.hookShare).toBeCloseTo(4200 / 9040);
   expect(out.permissions).toEqual([["config / accept", 1]]);
-  expect(out.recentPrompts[0]!.wallMs).toBe(8000);
+  // The UserPromptSubmit hook's own span (total_duration_ms 1200, completed 8800ms ago) starts
+  // 10000ms ago, earlier than the user_prompt event itself (9000ms ago): bounds include span
+  // starts, so wallMs runs from there to the last event (1000ms ago), not just event timestamps.
+  expect(out.recentPrompts[0]!.wallMs).toBe(9000);
   expect(out.models.map((m) => m.name)).toEqual(["claude-sonnet-5"]);
 });
 

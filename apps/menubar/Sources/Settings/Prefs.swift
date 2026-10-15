@@ -11,7 +11,6 @@ enum Prefs {
         static let requestTimeoutSec = "requestTimeoutSec"
         static let retryDelaySec = "retryDelaySec"
         static let enabledWindows = "enabledWindows"
-        static let keepDetailOpen = "keepDetailOpen"
         static let labelStyle = "labelStyle"
         static let labelValue = "labelValue"
         static let offlineText = "offlineText"
@@ -23,6 +22,8 @@ enum Prefs {
         static let showSlowest = "showSlowest"
         static let showTotalTime = "showTotalTime"
         static let showLiveFeed = "showLiveFeed"
+        static let showWaterfall = "showWaterfall"
+        static let hideHeadlessSessions = "hideHeadlessSessions"
         static let rowsPerList = "rowsPerList"
         static let liveFeedLength = "liveFeedLength"
         static let hideHookStartEvents = "hideHookStartEvents"
@@ -36,10 +37,10 @@ enum Prefs {
         // tab's default time window, just under its original pre-Settings name.
         static let allManaged = [
             window, collectorURL, statusPollIntervalSec, panelPollIntervalSec, requestTimeoutSec,
-            retryDelaySec, enabledWindows, keepDetailOpen, labelStyle, labelValue, offlineText, bounceIconOnSlow,
+            retryDelaySec, enabledWindows, labelStyle, labelValue, offlineText, bounceIconOnSlow,
             panelWidth, showKpis, showLatencyChart, showBreakdown, showSlowest, showTotalTime,
-            showLiveFeed, rowsPerList, liveFeedLength, hideHookStartEvents, hookWarnThresholdMs,
-            animationsMode, runCollector,
+            showLiveFeed, showWaterfall, hideHeadlessSessions, rowsPerList, liveFeedLength,
+            hideHookStartEvents, hookWarnThresholdMs, animationsMode, runCollector,
             // Kind pickers inside the panel's two lists, persisted since before Settings existed.
             "slowestKind", "totalTimeKind",
         ]
@@ -53,13 +54,13 @@ enum Prefs {
         static let requestTimeoutSec = 2.0
         static let retryDelaySec = 2.0
         static let enabledWindowsRaw = "15,60,1440,10080"
-        static let keepDetailOpen = false
         static let bounceIconOnSlow = true
         static let panelWidth = 360
         static let showSection = true
         static let rowsPerList = 3
         static let liveFeedLength = 6
         static let hideHookStartEvents = true
+        static let hideHeadlessSessions = false
         static let hookWarnThresholdMs = 2000.0
         static let runCollector = true
     }
