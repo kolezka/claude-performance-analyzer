@@ -42,7 +42,11 @@ A slow Claude Code turn can come from many places: the model, a long Bash call, 
 
 ## Quick start
 
-**Requirements:** macOS 14 or later, [Bun](https://bun.sh), and Xcode Command Line Tools (`xcode-select --install`).
+**Requirements:** macOS 14 or later.
+
+Download the `.dmg` from the [latest release](https://github.com/kolezka/claude-performance-analyzer/releases/latest), drag ClaudeTelemetry to Applications and open it. The app ships the collector and starts it in the background as a login item, so it keeps recording while the app is closed. You can turn it off in Settings > General, or in System Settings > General > Login Items.
+
+To build from source instead, you need [Bun](https://bun.sh) and Xcode 26:
 
 ```bash
 git clone https://github.com/kolezka/claude-performance-analyzer.git
@@ -111,9 +115,9 @@ Bun workspaces. Each package has its own `src/` and `test/`.
 
 | Path | What it does |
 | --- | --- |
-| `apps/collector` | Bun OTLP receiver (http/json or http/protobuf, gzip ok) on `127.0.0.1:4318`. Stores to SQLite with 14 day retention. Serves the dashboard and the JSON API. |
+| `apps/collector` | Bun OTLP receiver (http/json or http/protobuf, gzip ok) on `127.0.0.1:4318`. Stores to SQLite with 14 day retention. Serves the dashboard and the JSON API. `scripts/compile.ts` builds it into a standalone binary for the app bundle. |
 | `apps/dashboard` | Svelte web dashboard, bundled by the collector through its HTML import. |
-| `apps/menubar` | SwiftUI menu bar app (`MenuBarExtra`), built with `swiftc` into a universal (arm64 and x86_64) `.app`. Code in `Sources/`, plist and icon in `Resources/`, build and release in `scripts/`. |
+| `apps/menubar` | SwiftUI menu bar app (`MenuBarExtra`), built with `swiftc` into a universal (arm64 and x86_64) `.app`. Bundles the compiled collector and runs it as a LaunchAgent. Code in `Sources/`, plists and icon in `Resources/`, build and release in `scripts/`. |
 | `packages/otlp` | Decodes OTLP http/json and http/protobuf into rows. |
 | `packages/analytics` | Summaries, percentiles, turn timelines. Shared by the collector and the dashboard. |
 | `packages/claude-settings` | Adds the telemetry variables to Claude Code's `settings.json`. |

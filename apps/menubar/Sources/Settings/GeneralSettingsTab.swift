@@ -7,6 +7,9 @@ struct GeneralSettingsTab: View {
     @AppStorage(Prefs.Key.keepDetailOpen) private var keepDetailOpen = Prefs.Defaults.keepDetailOpen
     @State private var loginItemEnabled = SMAppService.mainApp.status == .enabled
     @State private var loginItemError: String?
+    @State private var runCollector = CollectorAgent.isWanted
+    @State private var collectorStatus = CollectorAgent.service.status
+    @State private var collectorError: String?
 
     var body: some View {
         Form {
@@ -14,6 +17,19 @@ struct GeneralSettingsTab: View {
                 Toggle("Launch at login", isOn: loginItemBinding)
                 if let loginItemError {
                     Text(loginItemError).font(.caption).foregroundStyle(.red)
+                }
+            }
+            Section("Collector") {
+                Toggle("Run bundled collector in the background", isOn: collectorBinding)
+                if collectorStatus == .requiresApproval {
+                    HStack {
+                        Text("Turned off in System Settings.").font(.caption).foregroundStyle(.secondary)
+                        Button("Open Login Items") { SMAppService.openSystemSettingsLoginItems() }
+                            .controlSize(.small)
+                    }
+                }
+                if let collectorError {
+                    Text(collectorError).font(.caption).foregroundStyle(.red)
                 }
             }
             Section("Default Time Window") {
@@ -34,7 +50,11 @@ struct GeneralSettingsTab: View {
         }
         .formStyle(.grouped)
         // The login item can change outside this tab (Reset, System Settings), so re-read it.
-        .onAppear { loginItemEnabled = SMAppService.mainApp.status == .enabled }
+        .onAppear {
+            loginItemEnabled = SMAppService.mainApp.status == .enabled
+            runCollector = CollectorAgent.isWanted
+            collectorStatus = CollectorAgent.service.status
+        }
     }
 
     private var loginItemBinding: Binding<Bool> {
@@ -52,6 +72,25 @@ struct GeneralSettingsTab: View {
                     loginItemError = error.localizedDescription
                 }
                 loginItemEnabled = SMAppService.mainApp.status == .enabled
+            }
+        )
+    }
+
+    private var collectorBinding: Binding<Bool> {
+        Binding(
+            get: { runCollector },
+            set: { wanted in
+                runCollector = wanted
+                Task {
+                    do {
+                        try await CollectorAgent.setWanted(wanted)
+                        collectorError = nil
+                    } catch {
+                        collectorError = error.localizedDescription
+                    }
+                    runCollector = CollectorAgent.isWanted
+                    collectorStatus = CollectorAgent.service.status
+                }
             }
         )
     }

@@ -113,7 +113,7 @@ struct PanelView: View {
                 EmptyState(
                     title: "Collector not running",
                     symbol: "bolt.horizontal.circle",
-                    message: "Start it with `bun run start`.",
+                    message: LocalizedStringKey(CollectorAgent.offlineHint),
                     retry: model.retry
                 )
                 .id("offline")
