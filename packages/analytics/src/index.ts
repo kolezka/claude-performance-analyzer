@@ -709,3 +709,352 @@ export function turnTimeline(events: EventRow[]) {
 }
 
 export type TurnTimeline = NonNullable<ReturnType<typeof turnTimeline>>;
+
+// The client capability suffix Claude Code can append to a model id (e.g. "[1m]" for long
+// context). It is never part of the model's identity: two events for the same call can carry
+// it on one side and not the other, so every model comparison strips it first.
+function stripModelSuffix(model: string): string {
+  return model.replace(/\[[^\]]*\]$/, "");
+}
+
+// "claude-opus-5-5" -> "Opus 5.5", "claude-sonnet-5" -> "Sonnet 5", "claude-opus-5-5[1m]" ->
+// "Opus 5.5". Anything whose stripped id is not exactly "claude-<family>-<digits>(-<digits>)*"
+// passes through (suffix still stripped): Swift relies on this label directly, so a wrong guess
+// at an unfamiliar id would be worse than showing the raw one.
+export function prettyModelName(model: string): string {
+  const stripped = stripModelSuffix(model);
+  const m = stripped.match(/^claude-([a-z]+)-(\d+(?:-\d+)*)$/);
+  if (!m) return stripped;
+  const family = m[1]!;
+  const version = m[2]!.replace(/-/g, ".");
+  return `${family[0]!.toUpperCase()}${family.slice(1)} ${version}`;
+}
+
+// "away_summary" -> "away summary", for a background api row's label.
+function humanizeQuerySource(source: string): string {
+  return source.replace(/_/g, " ");
+}
+
+export interface TurnHookRef {
+  startMs: number;
+  endMs: number;
+  id: number | null;
+}
+
+export interface TurnRow {
+  lane: string;
+  kind: "api" | "tool" | "hooks" | "agent" | "compaction";
+  label: string;
+  detail: string | null;
+  startMs: number;
+  endMs: number;
+  ok: boolean;
+  id: number | null;
+  // A PreToolUse/PostToolUse(Failure) hook attached to this tool row, matched by tool name and
+  // timing. Only ever set on a "tool" row.
+  pre: TurnHookRef | null;
+  post: TurnHookRef | null;
+  // Hook time charged to this row: pre + post for a tool row, its own duration for an
+  // unattached "hooks" row, 0 otherwise. Summed across rows this equals breakdown.hookMs.
+  hookMs: number;
+}
+
+export interface TurnLane {
+  id: string;
+  kind: "main" | "subagent" | "background";
+  title: string;
+  model: string | null;
+}
+
+export interface TurnRows {
+  lanes: TurnLane[];
+  rows: TurnRow[];
+  breakdown: { apiMs: number; toolMs: number; hookMs: number };
+}
+
+const PRE_HOOK_EVENT = "PreToolUse";
+const POST_HOOK_EVENTS = new Set(["PostToolUse", "PostToolUseFailure"]);
+// A PreToolUse hook finishes before the tool call it gates starts, but a permission check or
+// the auto-mode classifier can run in between, measured 2-3s on real data; PostToolUse runs
+// right after its tool, so a much tighter window is enough there.
+const PRE_HOOK_WINDOW_MS = 30_000;
+const POST_HOOK_WINDOW_MS = 5_000;
+// How close an api_request's own logged timestamp must land to a claude_code.llm_request
+// span's end for the two to be considered the same call.
+const API_SPAN_MATCH_MS = 250;
+
+function toolUseIdFromAttrs(a: Attrs): string | undefined {
+  const v = a.tool_use_id ?? a["gen_ai.tool.call.id"];
+  return typeof v === "string" ? v : undefined;
+}
+
+// The tool name a PreToolUse/PostToolUse(Failure) hook fired for: hook_matcher when present
+// (the actual trigger for this one execution), else whatever follows the colon in hook_name.
+function hookTargetFromAttrs(a: Attrs): string | undefined {
+  if (typeof a.hook_matcher === "string" && a.hook_matcher !== "") return a.hook_matcher;
+  const name = typeof a.hook_name === "string" ? a.hook_name : undefined;
+  const i = name ? name.indexOf(":") : -1;
+  return i >= 0 ? name!.slice(i + 1) : undefined;
+}
+
+// A tool_result's own name for matching against a hook's target. An MCP call's tool_name is
+// just the generic "mcp_tool"; the hook names it by its qualified "mcp__<server>__<tool>" form
+// instead (how the model itself calls it), reconstructed here from the same tool_parameters
+// toolLabel() already reads for display.
+function toolMatchName(a: Attrs): string {
+  const raw = String(a.tool_name ?? "");
+  if (raw !== "mcp_tool") return raw;
+  const params = parseJson(a.tool_parameters);
+  const server = params.mcp_server_name;
+  const tool = params.mcp_tool_name;
+  return typeof server === "string" && typeof tool === "string" ? `mcp__${server}__${tool}` : raw;
+}
+
+// An unattached hook's own row label: the well-known lifecycle events read as a short phrase,
+// everything else (an orphaned PreToolUse:X with no matching tool, say) keeps hookLabel()'s text.
+function unattachedHookLabel(a: Attrs): string {
+  if (a.hook_event === "UserPromptSubmit") return "Prompt hooks";
+  if (a.hook_event === "Stop") return "Stop hooks";
+  if (a.hook_event === "SubagentStop") return "Subagent stop hooks";
+  return hookLabel(a);
+}
+
+interface ToolCandidate {
+  row: TurnRow;
+  toolName: string;
+  preClaimed: boolean;
+  postClaimed: boolean;
+}
+
+// Builds one row per api/tool/hook/agent/compaction event, grouped into lanes (the main thread,
+// one per subagent, and a shared background lane) so a turn with parallel subagent tool calls
+// renders as separate timelines instead of one interleaved list. Spans are only needed to learn
+// which lane a row belongs to (via agent_id); everything else comes from the events themselves.
+export function buildTurnRows(events: EventRow[], spans: SpanRow[]): TurnRows {
+  const toolSpans = spans.filter((s) => s.name === "claude_code.tool");
+  const llmSpans = spans.filter((s) => s.name === "claude_code.llm_request");
+
+  const toolUseIdToAgentId = new Map<string, string | null>();
+  for (const s of toolSpans) {
+    const key = toolUseIdFromAttrs(s.attrs);
+    if (key !== undefined) toolUseIdToAgentId.set(key, typeof s.attrs.agent_id === "string" ? s.attrs.agent_id : null);
+  }
+
+  const claimedSpans = new Set<SpanRow>();
+  // The closest not-yet-claimed llm_request span for this event's session and model, within
+  // API_SPAN_MATCH_MS of its end. Each span can back at most one api_request row. Models are
+  // compared with their [...] suffix stripped: the event and its span can disagree on whether
+  // it is present even though they are the same call.
+  function matchLlmSpan(e: EventRow): SpanRow | null {
+    const eventModel = typeof e.attrs.model === "string" ? stripModelSuffix(e.attrs.model) : null;
+    let best: SpanRow | null = null;
+    let bestDelta = Infinity;
+    for (const s of llmSpans) {
+      if (claimedSpans.has(s) || s.sessionId !== e.sessionId) continue;
+      if (typeof s.attrs.model !== "string" || stripModelSuffix(s.attrs.model) !== eventModel) continue;
+      const delta = Math.abs(s.endMs - e.tsMs);
+      if (delta < API_SPAN_MATCH_MS && delta < bestDelta) {
+        best = s;
+        bestDelta = delta;
+      }
+    }
+    if (best) claimedSpans.add(best);
+    return best;
+  }
+
+  const agentNames = new Map<string, string>();
+  const laneModel = new Map<string, string>();
+
+  // Lane key for an api_request row: the matched span's agent_id when one is found (absent
+  // agent_id on the span means the main thread); otherwise query_source decides: "agent:*" is a
+  // subagent keyed by its name, "repl_main_thread" is main, anything else is background.
+  function apiLaneKey(e: EventRow): string {
+    // Stored pretty and suffix-free: the app appends this straight onto the lane title.
+    const model = typeof e.attrs.model === "string" ? prettyModelName(e.attrs.model) : null;
+    const span = matchLlmSpan(e);
+    if (span) {
+      const agentId = typeof span.attrs.agent_id === "string" ? span.attrs.agent_id : null;
+      if (!agentId) return "main";
+      if (typeof e.attrs["agent.name"] === "string") agentNames.set(agentId, e.attrs["agent.name"]);
+      if (model && !laneModel.has(agentId)) laneModel.set(agentId, model);
+      return agentId;
+    }
+    const querySource = typeof e.attrs.query_source === "string" ? e.attrs.query_source : "";
+    if (querySource.startsWith("agent:")) {
+      const name = typeof e.attrs["agent.name"] === "string" ? e.attrs["agent.name"] : querySource.slice("agent:".length);
+      const key = `agent:${name}`;
+      agentNames.set(key, name);
+      if (model && !laneModel.has(key)) laneModel.set(key, model);
+      return key;
+    }
+    if (querySource === "repl_main_thread") return "main";
+    return "background";
+  }
+
+  // Lane key for a tool_result row: the agent_id its matching claude_code.tool span carries,
+  // else main (no span, or a span with no agent_id: the main thread).
+  function toolLaneKey(e: EventRow): string {
+    const key = toolUseIdFromAttrs(e.attrs);
+    const agentId = key !== undefined ? toolUseIdToAgentId.get(key) : undefined;
+    return agentId ?? "main";
+  }
+
+  const toolCandidates: ToolCandidate[] = [];
+  const rows: TurnRow[] = [];
+  let apiMs = 0;
+  let toolMs = 0;
+  let hookMs = 0;
+
+  for (const e of events) {
+    const a = e.attrs;
+    switch (e.name) {
+      case "api_request": {
+        const ms = num(a.duration_ms);
+        apiMs += ms;
+        const lane = apiLaneKey(e);
+        const model = typeof a.model === "string" ? a.model : "model";
+        const querySource = typeof a.query_source === "string" ? a.query_source : "";
+        const label = lane === "background" && querySource ? `${prettyModelName(model)} · ${humanizeQuerySource(querySource)}` : prettyModelName(model);
+        rows.push({ lane, kind: "api", label, detail: null, startMs: e.tsMs - ms, endMs: e.tsMs, ok: true, id: e.id ?? null, pre: null, post: null, hookMs: 0 });
+        break;
+      }
+      case "tool_result": {
+        const ms = num(a.duration_ms);
+        toolMs += ms;
+        const row: TurnRow = {
+          lane: toolLaneKey(e),
+          kind: "tool",
+          label: toolLabel(a),
+          detail: itemRecentDetail("tools", a),
+          startMs: e.tsMs - ms,
+          endMs: e.tsMs,
+          ok: !isFalse(a.success),
+          id: e.id ?? null,
+          pre: null,
+          post: null,
+          hookMs: 0,
+        };
+        rows.push(row);
+        toolCandidates.push({ row, toolName: toolMatchName(a), preClaimed: false, postClaimed: false });
+        break;
+      }
+      case "subagent_completed": {
+        const ms = num(a.duration_ms);
+        rows.push({ lane: "main", kind: "agent", label: `agent ${agentLabel(a)}`, detail: itemRecentDetail("agents", a), startMs: e.tsMs - ms, endMs: e.tsMs, ok: true, id: e.id ?? null, pre: null, post: null, hookMs: 0 });
+        break;
+      }
+      case "compaction": {
+        const ms = num(a.duration_ms);
+        rows.push({ lane: "main", kind: "compaction", label: "compaction", detail: null, startMs: e.tsMs - ms, endMs: e.tsMs, ok: !isFalse(a.success), id: e.id ?? null, pre: null, post: null, hookMs: 0 });
+        break;
+      }
+    }
+  }
+
+  // Each hook attaches to the nearest same-named tool row, in the direction its own event
+  // implies (Pre looks forward to the tool's start, Post looks backward to its end). The
+  // nearest candidate is found first and claim-checked second, never skipped: a hook whose
+  // rightful call is already taken stays unattached rather than reaching past it to a farther
+  // call of the same name. Anything left unattached becomes its own row in the main lane.
+  const hookEvents = events.filter((e) => e.name === "hook_execution_complete").sort((x, y) => x.tsMs - y.tsMs);
+  for (const e of hookEvents) {
+    const a = e.attrs;
+    const duration = num(a.total_duration_ms);
+    hookMs += duration;
+    const target = hookTargetFromAttrs(a);
+    const hookStart = e.tsMs - duration;
+    const hookEnd = e.tsMs;
+    const ref: TurnHookRef = { startMs: hookStart, endMs: hookEnd, id: e.id ?? null };
+    const isPre = a.hook_event === PRE_HOOK_EVENT;
+    const isPost = typeof a.hook_event === "string" && POST_HOOK_EVENTS.has(a.hook_event);
+
+    let attached = false;
+    if (target !== undefined && (isPre || isPost)) {
+      let nearest: ToolCandidate | null = null;
+      let nearestDelta = Infinity;
+      for (const c of toolCandidates) {
+        if (c.toolName !== target) continue;
+        const delta = isPre ? c.row.startMs - hookEnd : hookStart - c.row.endMs;
+        const windowMs = isPre ? PRE_HOOK_WINDOW_MS : POST_HOOK_WINDOW_MS;
+        if (delta >= 0 && delta <= windowMs && delta < nearestDelta) {
+          nearest = c;
+          nearestDelta = delta;
+        }
+      }
+      const claimed = nearest && (isPre ? nearest.preClaimed : nearest.postClaimed);
+      if (nearest && !claimed) {
+        if (isPre) {
+          nearest.preClaimed = true;
+          nearest.row.pre = ref;
+        } else {
+          nearest.postClaimed = true;
+          nearest.row.post = ref;
+        }
+        nearest.row.hookMs += duration;
+        attached = true;
+      }
+    }
+
+    if (!attached) {
+      rows.push({
+        lane: "main",
+        kind: "hooks",
+        label: unattachedHookLabel(a),
+        detail: a.hook_matcher ? String(a.hook_matcher) : `${num(a.num_hooks)} hooks`,
+        startMs: hookStart,
+        endMs: hookEnd,
+        ok: num(a.num_non_blocking_error) === 0,
+        id: e.id ?? null,
+        pre: null,
+        post: null,
+        hookMs: duration,
+      });
+    }
+  }
+
+  rows.sort((x, y) => x.startMs - y.startMs);
+
+  const laneRows = new Map<string, TurnRow[]>();
+  for (const r of rows) (laneRows.get(r.lane) ?? laneRows.set(r.lane, []).get(r.lane)!).push(r);
+
+  // Safety net: a span-derived subagent lane (a bare agent_id) and a query_source fallback lane
+  // for the same agent ("agent:<name>") are the same run when one half's api_request never
+  // matched a span. If exactly one unnamed span-derived lane overlaps a named fallback lane in
+  // time, merge the fallback into it, so one agent never shows up as two lanes.
+  const laneBoundsMs = (laneRowSet: TurnRow[]): [number, number] => [Math.min(...laneRowSet.map((r) => r.startMs)), Math.max(...laneRowSet.map((r) => r.endMs))];
+  const laneOverlaps = (a: [number, number], b: [number, number]) => Math.max(a[0], b[0]) <= Math.min(a[1], b[1]);
+
+  for (const fallbackId of [...laneRows.keys()].filter((id) => id.startsWith("agent:"))) {
+    const fallbackName = agentNames.get(fallbackId);
+    const fallbackRowSet = laneRows.get(fallbackId);
+    if (!fallbackName || !fallbackRowSet) continue;
+    const fallbackBounds = laneBoundsMs(fallbackRowSet);
+    const candidates = [...laneRows.keys()].filter(
+      (id) => id !== "main" && id !== "background" && !id.startsWith("agent:") && !agentNames.has(id) && laneOverlaps(laneBoundsMs(laneRows.get(id)!), fallbackBounds),
+    );
+    if (candidates.length !== 1) continue;
+
+    const targetId = candidates[0]!;
+    for (const r of fallbackRowSet) r.lane = targetId;
+    laneRows.get(targetId)!.push(...fallbackRowSet);
+    laneRows.delete(fallbackId);
+    agentNames.set(targetId, fallbackName);
+    const fallbackModel = laneModel.get(fallbackId);
+    if (fallbackModel) laneModel.set(targetId, fallbackModel);
+  }
+
+  const lanes: TurnLane[] = [];
+  if (laneRows.has("main")) lanes.push({ id: "main", kind: "main", title: "Main thread", model: null });
+
+  const subagentIds = [...laneRows.keys()].filter((id) => id !== "main" && id !== "background");
+  subagentIds.sort((x, y) => laneBoundsMs(laneRows.get(x)!)[0] - laneBoundsMs(laneRows.get(y)!)[0]);
+  for (const id of subagentIds) {
+    const name = agentNames.get(id);
+    const title = name ? `Subagent · ${name}` : `Subagent ${id.slice(0, 8)}`;
+    lanes.push({ id, kind: "subagent", title, model: laneModel.get(id) ?? null });
+  }
+
+  if (laneRows.has("background")) lanes.push({ id: "background", kind: "background", title: "Background", model: null });
+
+  return { lanes, rows, breakdown: { apiMs, toolMs, hookMs } };
+}

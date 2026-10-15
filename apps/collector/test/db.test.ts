@@ -41,6 +41,19 @@ test("hookEventsByLabel matches hookLabel()'s own fallback (hook_name, else hook
   expect(s.hookEventsByLabel(now - 1000, "nope")).toHaveLength(0);
 });
 
+test("spansForSession restricts to one session and a start_ms range", () => {
+  const s = store();
+  const now = Date.now();
+  s.addSpans([
+    { traceId: "t", spanId: "a", parentId: null, name: "claude_code.tool", startMs: now, endMs: now + 10, sessionId: "s1", attrs: { tool_use_id: "u1" } },
+    { traceId: "t", spanId: "b", parentId: null, name: "claude_code.tool", startMs: now, endMs: now + 10, sessionId: "s2", attrs: { tool_use_id: "u2" } },
+    { traceId: "t", spanId: "c", parentId: null, name: "claude_code.tool", startMs: now - 100_000, endMs: now - 99_990, sessionId: "s1", attrs: { tool_use_id: "u3" } },
+  ]);
+
+  const rows = s.spansForSession("s1", now - 1000, now + 1000);
+  expect(rows.map((r) => r.spanId)).toEqual(["a"]);
+});
+
 test("sessionEventsByNames restricts the session query to the given event names", () => {
   const s = store();
   const now = Date.now();

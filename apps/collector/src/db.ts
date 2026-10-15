@@ -15,6 +15,7 @@ export function openStore(path: string) {
     trace_id TEXT, span_id TEXT, parent_id TEXT, name TEXT NOT NULL,
     start_ms INTEGER NOT NULL, end_ms INTEGER NOT NULL, session_id TEXT, attrs TEXT NOT NULL)`);
   db.run("CREATE INDEX IF NOT EXISTS spans_start ON spans (start_ms)");
+  db.run("CREATE INDEX IF NOT EXISTS spans_session ON spans (session_id, start_ms)");
   db.run(`CREATE TABLE IF NOT EXISTS metrics (
     ts_ms INTEGER NOT NULL, name TEXT NOT NULL, session_id TEXT, value REAL NOT NULL, attrs TEXT NOT NULL)`);
   db.run("CREATE INDEX IF NOT EXISTS metrics_ts ON metrics (ts_ms)");
@@ -43,6 +44,17 @@ export function openStore(path: string) {
     attrs: JSON.parse(r.attrs),
   });
   const EVENT_COLUMNS = "rowid AS id, ts_ms, name, session_id, prompt_id, attrs";
+
+  const spanRow = (r: any): SpanRow => ({
+    traceId: r.trace_id,
+    spanId: r.span_id,
+    parentId: r.parent_id,
+    name: r.name,
+    startMs: r.start_ms,
+    endMs: r.end_ms,
+    sessionId: r.session_id,
+    attrs: JSON.parse(r.attrs),
+  });
 
   return {
     db,
@@ -125,19 +137,16 @@ export function openStore(path: string) {
         .map(eventRow);
     },
     spans(sinceMs: number): SpanRow[] {
+      return db.query("SELECT * FROM spans WHERE start_ms >= ? ORDER BY start_ms").all(sinceMs).map(spanRow);
+    },
+    // A turn's own spans: tool and llm_request spans carry the agent_id that groups a turn's
+    // rows into lanes. Padded past the turn's own bounds, since a span's clock can lag or lead
+    // the log event it correlates with by a little.
+    spansForSession(sessionId: string, sinceMs: number, untilMs: number): SpanRow[] {
       return db
-        .query("SELECT * FROM spans WHERE start_ms >= ? ORDER BY start_ms")
-        .all(sinceMs)
-        .map((r: any) => ({
-          traceId: r.trace_id,
-          spanId: r.span_id,
-          parentId: r.parent_id,
-          name: r.name,
-          startMs: r.start_ms,
-          endMs: r.end_ms,
-          sessionId: r.session_id,
-          attrs: JSON.parse(r.attrs),
-        }));
+        .query("SELECT * FROM spans WHERE session_id = ? AND start_ms >= ? AND start_ms <= ? ORDER BY start_ms")
+        .all(sessionId, sinceMs, untilMs)
+        .map(spanRow);
     },
     prune(olderThanMs: number) {
       db.run("DELETE FROM events WHERE ts_ms < ?", [olderThanMs]);

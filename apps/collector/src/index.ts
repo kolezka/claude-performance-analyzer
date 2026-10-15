@@ -4,6 +4,7 @@ import dashboard from "@cpa/dashboard/index.html";
 import { openStore } from "./db";
 import { decodeOtlp, parseLogs, parseMetrics, parseTraces, type EventRow, type Signal } from "@cpa/otlp";
 import {
+  buildTurnRows,
   eventDetails,
   extractPaths,
   idleGaps,
@@ -24,7 +25,7 @@ import { applyEnv, planEnv, settingsPath, telemetryEnv } from "@cpa/claude-setti
 import { BoundedCache } from "./bounded-cache";
 import { buildHookDefinitions, hookCallFromAttrs, type HookCall, type HookDefinition } from "./hooks";
 import { gitRoot, type RepoInfo } from "./repos";
-import { buildSessionInfo, SESSION_EVENT_NAMES, type SessionInfo } from "./sessions";
+import { branchAsOf, buildSessionInfo, repoAsOf, SESSION_EVENT_NAMES, type SessionInfo } from "./sessions";
 
 const HOME = homedir();
 
@@ -119,6 +120,13 @@ function repoForEvent(e: EventRow): RepoInfo | null {
   return repoFor(e.sessionId);
 }
 
+// A repo's worktree path (falling back to its root) with $HOME shortened to "~", for display.
+function folderFor(repo: RepoInfo | null): string | null {
+  if (!repo) return null;
+  const path = repo.worktree ?? repo.root;
+  return path === HOME ? "~" : path.startsWith(`${HOME}/`) ? `~${path.slice(HOME.length)}` : path;
+}
+
 function eventDetail(req: Request) {
   const id = Number(new URL(req.url).searchParams.get("id"));
   if (!Number.isFinite(id)) return new Response("Not Found", { status: 404 });
@@ -154,23 +162,32 @@ interface Recent {
   sessionLabel: string | null;
   branch: string | null;
   hooks: HookCall | null;
+  folder: string | null;
+  worktree: boolean;
 }
 
 function toRecent(kind: ItemKind, e: EventRow): Recent {
   const info = e.sessionId ? sessionInfoFor(e.sessionId) : null;
+  const repo = repoForEvent(e);
+  // folder/worktree/branch are "as of this call": the repo and branch active at its own
+  // timestamp, not the session's all-time dominant one a long session can have since moved on
+  // from (e.g. a hook call logged after the session's work already shifted to another repo).
+  const asOfRepo = info ? repoAsOf(info, e.tsMs, e.promptId) : null;
   return {
     id: e.id as number,
     tsMs: e.tsMs,
     ms: itemDurationMs(kind, e.attrs),
     ok: !itemFailed(kind, e.attrs),
     sessionId: e.sessionId,
-    repo: repoForEvent(e)?.name ?? null,
+    repo: repo?.name ?? null,
     detail: itemRecentDetail(kind, e.attrs),
     promptId: e.promptId,
     sessionKind: info?.kind ?? null,
     sessionLabel: info?.kindLabel ?? null,
-    branch: info?.branch ?? null,
+    branch: info ? branchAsOf(info, e.tsMs, e.promptId) : null,
     hooks: kind === "hooks" ? hookCallFromAttrs(e.attrs) : null,
+    folder: folderFor(asOfRepo),
+    worktree: asOfRepo?.worktree != null,
   };
 }
 
@@ -263,25 +280,38 @@ function turnsList(req: Request) {
   const sorted = filtered.sort((a, b) => (sort === "slowest" ? b.activeMs - a.activeMs : b.startMs - a.startMs));
   const now = Date.now();
 
-  const turns = sorted.slice(0, limit).map((p) => ({
-    promptId: p.promptId,
-    startMs: p.startMs,
-    endMs: p.endMs,
-    wallMs: p.wallMs,
-    activeMs: p.activeMs,
-    idleMs: p.idleMs,
-    inProgress: now - p.endMs < 15_000,
-    sessionId: p.sessionId,
-    sessionKind: sessionKindFor(p.sessionId),
-    sessionLabel: p.sessionId ? (sessionInfoFor(p.sessionId)?.kindLabel ?? null) : null,
-    repo: repoFor(p.sessionId)?.name ?? null,
-    command: p.command,
-    apiMs: p.apiMs,
-    toolMs: p.toolMs,
-    hookMs: p.hookMs,
-  }));
+  const turns = sorted.slice(0, limit).map((p) => {
+    const repo = repoFor(p.sessionId);
+    const info = p.sessionId ? sessionInfoFor(p.sessionId) : null;
+    // "As of the call": the repo/branch active when the turn began, not the session's all-time
+    // dominant one (see toRecent's comment on repoAsOf/branchAsOf).
+    const asOfRepo = info ? repoAsOf(info, p.startMs, p.promptId) : null;
+    return {
+      promptId: p.promptId,
+      startMs: p.startMs,
+      endMs: p.endMs,
+      wallMs: p.wallMs,
+      activeMs: p.activeMs,
+      idleMs: p.idleMs,
+      inProgress: now - p.endMs < 15_000,
+      sessionId: p.sessionId,
+      sessionKind: sessionKindFor(p.sessionId),
+      sessionLabel: info?.kindLabel ?? null,
+      repo: repo?.name ?? null,
+      folder: folderFor(asOfRepo),
+      command: p.command,
+      apiMs: p.apiMs,
+      toolMs: p.toolMs,
+      hookMs: p.hookMs,
+    };
+  });
   return Response.json(turns);
 }
+
+// Spans correlate to events by timestamp, not by prompt.id (spans carry no prompt id at all),
+// so a turn's own spans are fetched by session and a time pad around its bounds rather than an
+// exact window: a span's clock can lag or lead the log event it matches by a little.
+const SPAN_PAD_MS = 15_000;
 
 function turnDetail(req: Request) {
   const events = store.promptEvents(new URL(req.url).searchParams.get("prompt"));
@@ -289,15 +319,25 @@ function turnDetail(req: Request) {
   if (!timeline) return Response.json(null);
   const info = timeline.sessionId ? sessionInfoFor(timeline.sessionId) : null;
   const { gaps, activeMs, idleMs } = idleGaps(events, timeline.startMs, timeline.endMs);
+  const spans = timeline.sessionId ? store.spansForSession(timeline.sessionId, timeline.startMs - SPAN_PAD_MS, timeline.endMs + SPAN_PAD_MS) : [];
+  const { lanes, rows, breakdown } = buildTurnRows(events, spans);
+  // "As of the call": the repo/branch active when the turn began, not the session's all-time
+  // dominant one (see toRecent's comment on repoAsOf/branchAsOf).
+  const asOfRepo = info ? repoAsOf(info, timeline.startMs, timeline.promptId) : null;
   return Response.json({
     ...timeline,
     sessionId: timeline.sessionId,
     sessionKind: info?.kind ?? null,
     sessionLabel: info?.kindLabel ?? null,
     repo: info?.repo?.name ?? null,
+    folder: folderFor(asOfRepo),
+    branch: info ? branchAsOf(info, timeline.startMs, timeline.promptId) : null,
     gaps,
     activeMs,
     idleMs,
+    breakdown,
+    lanes,
+    rows,
   });
 }
 
