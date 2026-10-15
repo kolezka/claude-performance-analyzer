@@ -113,57 +113,15 @@ struct WaterfallView: View {
     }
 
     // Reuses the Breakdown section's API/Tools/Hooks colors; agent and compaction are new here.
+    // "hook" (old flat Span.kind) and "hooks" (new lane Row.kind) are the same color.
     static func color(for kind: String) -> Color {
         switch kind {
         case "api": .blue
         case "tool": .purple
-        case "hook": .orange
+        case "hook", "hooks": .orange
         case "agent": .green
         case "compaction": .gray
         default: .secondary
         }
-    }
-}
-
-// Maps an absolute ms timestamp to an x offset on the compressed axis: active time scales
-// linearly over activePixelWidth, each gap counts as a fixed gapPixelWidth regardless of its
-// real duration. Spans never overlap a gap by construction, so the mid-gap clamp only matters
-// for a marker drawn exactly at a gap's own boundary.
-private struct GapTimeline {
-    let gaps: [TurnDetail.Gap]
-    let startMs: Double
-    let endMs: Double
-    let gapPixelWidth: CGFloat
-    let activePixelWidth: CGFloat
-
-    private var activeDuration: Double {
-        let gapTotal = gaps.reduce(0.0) { $0 + ($1.endMs - $1.startMs) }
-        return max(endMs - startMs - gapTotal, 0)
-    }
-
-    func x(_ ms: Double) -> CGFloat {
-        var elapsedActive = 0.0
-        var gapsPassed = 0
-        var cursor = startMs
-        for gap in gaps {
-            if ms <= gap.startMs {
-                elapsedActive += max(ms - cursor, 0)
-                return fraction(elapsedActive) * activePixelWidth + CGFloat(gapsPassed) * gapPixelWidth
-            }
-            elapsedActive += max(gap.startMs - cursor, 0)
-            gapsPassed += 1
-            cursor = gap.endMs
-            if ms < gap.endMs {
-                return fraction(elapsedActive) * activePixelWidth + CGFloat(gapsPassed - 1) * gapPixelWidth
-            }
-        }
-        elapsedActive += max(ms - cursor, 0)
-        return fraction(elapsedActive) * activePixelWidth + CGFloat(gapsPassed) * gapPixelWidth
-    }
-
-    private func fraction(_ elapsed: Double) -> CGFloat {
-        let duration = activeDuration
-        guard duration > 0 else { return 0 }
-        return CGFloat(elapsed / duration)
     }
 }

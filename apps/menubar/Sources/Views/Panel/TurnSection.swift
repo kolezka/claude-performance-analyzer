@@ -87,9 +87,7 @@ struct TurnSection: View {
             VStack(alignment: .leading, spacing: 1) {
                 if let current {
                     HStack(spacing: 4) {
-                        Text(current.sessionLabel ?? current.repo ?? "Unknown session")
-                            .lineLimit(1)
-                            .truncationMode(.middle)
+                        subtitle(folder: current.folder, sessionLabel: current.sessionLabel, repo: current.repo)
                         if current.inProgress {
                             Text("In progress").foregroundStyle(.orange)
                         } else if isPinned {
@@ -103,9 +101,7 @@ struct TurnSection: View {
                         .monospacedDigit()
                 } else if case .agedOut = position, let detail = model.turnDetail {
                     HStack(spacing: 4) {
-                        Text(detail.sessionLabel ?? detail.repo ?? "Unknown session")
-                            .lineLimit(1)
-                            .truncationMode(.middle)
+                        subtitle(folder: detail.folder, sessionLabel: detail.sessionLabel, repo: detail.repo)
                         Text("Pinned, aged out of list").foregroundStyle(.secondary)
                     }
                     .font(.caption.weight(.medium))
@@ -132,14 +128,47 @@ struct TurnSection: View {
         .font(.callout)
     }
 
+    // The folder (monospaced, abbreviated, middle-truncated) stands in for the session label
+    // wherever both might be shown; older collectors without it keep the old fallback chain.
+    private func subtitle(folder: String?, sessionLabel: String?, repo: String?) -> some View {
+        Group {
+            if let folder {
+                Text(abbreviateHome(folder)).monospaced()
+            } else {
+                Text(sessionLabel ?? repo ?? "Unknown session")
+            }
+        }
+        .lineLimit(1)
+        .truncationMode(.middle)
+    }
+
     @ViewBuilder
     private var waterfall: some View {
         if let error = model.turnDetailError {
             Text(error).font(.caption).foregroundStyle(.secondary)
         } else if let detail = model.turnDetail {
-            if detail.spans.isEmpty {
-                Text("No spans recorded for this turn.").font(.caption).foregroundStyle(.secondary)
-            } else {
+            if let lanes = detail.lanes, let rows = detail.rows, !rows.isEmpty {
+                // Main lane only in the compact section; every lane and its full row list
+                // live in the Details window instead.
+                if let mainLaneId = (lanes.first { $0.kind == "main" } ?? lanes.first)?.id {
+                    LaneWaterfallView(
+                        lanes: lanes,
+                        rows: rows,
+                        startMs: detail.startMs,
+                        endMs: detail.endMs,
+                        gaps: detail.gaps ?? [],
+                        onSelect: onSelectEvent,
+                        rowHeight: 14,
+                        showAxis: false,
+                        showLegend: false,
+                        showLaneHeaders: false,
+                        onlyLaneId: mainLaneId,
+                        maxRows: maxRows
+                    )
+                } else {
+                    Text("No lanes recorded for this turn.").font(.caption).foregroundStyle(.secondary)
+                }
+            } else if !detail.spans.isEmpty {
                 VStack(alignment: .leading, spacing: 4) {
                     WaterfallView(
                         spans: Array(detail.spans.prefix(maxRows)),
@@ -153,6 +182,8 @@ struct TurnSection: View {
                         Text("+\(detail.spans.count - maxRows) more").font(.caption2).foregroundStyle(.tertiary)
                     }
                 }
+            } else {
+                Text("No spans recorded for this turn.").font(.caption).foregroundStyle(.secondary)
             }
         } else {
             ProgressView().controlSize(.small).frame(maxWidth: .infinity, alignment: .leading)

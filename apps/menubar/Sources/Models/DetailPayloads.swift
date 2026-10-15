@@ -79,6 +79,9 @@ struct ItemDetail: Decodable {
         let sessionLabel: String?
         let branch: String?
         let hooks: HookRecentInfo?
+        // Missing from older collectors, which only reported the session's repo name.
+        let folder: String?
+        let worktree: Bool?
     }
     struct Definition: Decodable {
         let source: String
@@ -126,11 +129,14 @@ struct TurnSummary: Decodable, Identifiable {
     // Missing from older collectors, which didn't separate idle time from active turn time.
     let activeMs: Double?
     let idleMs: Double?
+    let folder: String?
 }
 
 // /api/turn: one turn's full span list for the waterfall. The collector returns JSON null
 // when the prompt has no recorded events, so this decodes as an optional at the call site.
 struct TurnDetail: Decodable {
+    // Flat span list from the first cut of this view. Kept as a fallback render when an
+    // older collector sends no `rows`/`lanes`.
     struct Span: Decodable {
         let kind: String
         let label: String
@@ -146,6 +152,38 @@ struct TurnDetail: Decodable {
         let startMs: Double
         let endMs: Double
     }
+    struct Breakdown: Decodable {
+        let apiMs: Double
+        let toolMs: Double
+        let hookMs: Double
+    }
+    // One track of the lane-grouped waterfall: the main thread, one per concurrent subagent,
+    // or background work.
+    struct Lane: Decodable, Identifiable {
+        let id: String
+        let kind: String
+        let title: String
+        let model: String?
+    }
+    // A hook call folded directly onto its tool row instead of getting its own row.
+    struct HookRef: Decodable {
+        let startMs: Double
+        let endMs: Double
+        let id: Int?
+    }
+    struct Row: Decodable {
+        let lane: String
+        let kind: String
+        let label: String
+        let detail: String?
+        let startMs: Double
+        let endMs: Double
+        let ok: Bool
+        let id: Int?
+        let pre: HookRef?
+        let post: HookRef?
+        let hookMs: Double
+    }
 
     let promptId: String?
     let command: String?
@@ -156,8 +194,14 @@ struct TurnDetail: Decodable {
     let sessionLabel: String?
     let repo: String?
     let spans: [Span]
-    // Missing from older collectors, which didn't separate idle time from active turn time.
+    // Missing from older collectors, which didn't separate idle time from active turn time,
+    // name a working folder, or group work into lanes.
     let gaps: [Gap]?
     let activeMs: Double?
     let idleMs: Double?
+    let folder: String?
+    let branch: String?
+    let breakdown: Breakdown?
+    let lanes: [Lane]?
+    let rows: [Row]?
 }

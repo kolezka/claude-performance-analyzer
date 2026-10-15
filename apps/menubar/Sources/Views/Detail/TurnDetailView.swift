@@ -14,17 +14,10 @@ struct TurnDetailView: View {
         VStack(alignment: .leading, spacing: 12) {
             if let detail {
                 header(detail)
-                if detail.spans.isEmpty {
-                    Text("No spans recorded for this turn.").font(.callout).foregroundStyle(.secondary)
-                } else {
-                    WaterfallView(
-                        spans: detail.spans,
-                        startMs: detail.startMs,
-                        endMs: detail.endMs,
-                        gaps: detail.gaps ?? [],
-                        onSelect: { id in onPush(.event(id: id)) }
-                    )
+                if let breakdown = detail.breakdown {
+                    Breakdown(breakdown: Summary.Breakdown(api: breakdown.apiMs, tools: breakdown.toolMs, hooks: breakdown.hookMs))
                 }
+                waterfall(detail)
             } else if notFound {
                 EmptyState(
                     title: "Turn not found",
@@ -58,10 +51,29 @@ struct TurnDetailView: View {
 
     private func header(_ d: TurnDetail) -> some View {
         VStack(alignment: .leading, spacing: 3) {
-            Text(d.sessionLabel ?? d.repo ?? "Unknown session")
-                .font(.headline)
-                .lineLimit(1)
-                .truncationMode(.middle)
+            if let folder = d.folder {
+                HStack(spacing: 8) {
+                    Text(abbreviateHome(folder))
+                        .font(.headline)
+                        .monospaced()
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                    if let branch = d.branch {
+                        Label(branch, systemImage: "arrow.triangle.branch")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .help(folder)
+                if let sessionLabel = d.sessionLabel {
+                    Text(sessionLabel).font(.callout).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                }
+            } else {
+                Text(d.sessionLabel ?? d.repo ?? "Unknown session")
+                    .font(.headline)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
             if let command = d.command {
                 Text(command)
                     .font(.callout)
@@ -69,15 +81,36 @@ struct TurnDetailView: View {
                     .lineLimit(2)
                     .textSelection(.enabled)
             }
-            HStack(spacing: 10) {
-                if let repo = d.repo {
-                    Label(repo, systemImage: "folder").lineLimit(1).truncationMode(.middle)
-                }
-                Text(fmtTurnDuration(activeMs: d.activeMs, idleMs: d.idleMs, wallMs: d.endMs - d.startMs))
-            }
-            .font(.caption)
-            .foregroundStyle(.secondary)
-            .monospacedDigit()
+            Text(fmtTurnDuration(activeMs: d.activeMs, idleMs: d.idleMs, wallMs: d.endMs - d.startMs))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .monospacedDigit()
+        }
+    }
+
+    // Lane-grouped rendering needs both lanes and a non-empty row list; an older collector,
+    // or a turn with no recorded rows, falls back to the flat span waterfall.
+    @ViewBuilder
+    private func waterfall(_ d: TurnDetail) -> some View {
+        if let lanes = d.lanes, let rows = d.rows, !rows.isEmpty {
+            LaneWaterfallView(
+                lanes: lanes,
+                rows: rows,
+                startMs: d.startMs,
+                endMs: d.endMs,
+                gaps: d.gaps ?? [],
+                onSelect: { id in onPush(.event(id: id)) }
+            )
+        } else if !d.spans.isEmpty {
+            WaterfallView(
+                spans: d.spans,
+                startMs: d.startMs,
+                endMs: d.endMs,
+                gaps: d.gaps ?? [],
+                onSelect: { id in onPush(.event(id: id)) }
+            )
+        } else {
+            Text("No spans recorded for this turn.").font(.callout).foregroundStyle(.secondary)
         }
     }
 

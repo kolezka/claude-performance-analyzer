@@ -233,7 +233,12 @@ struct ItemDetailView: View {
                         if !call.ok {
                             Image(systemName: "xmark.octagon").foregroundStyle(.red)
                         }
-                        Text(call.sessionLabel ?? call.repo ?? "unknown").foregroundStyle(.secondary).lineLimit(1)
+                        Text(call.folder.map(abbreviateHome) ?? "folder unknown")
+                            .monospaced()
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                            .help(call.folder ?? "folder unknown")
                         if let branch = call.branch {
                             Label(branch, systemImage: "arrow.triangle.branch")
                                 .labelStyle(.titleOnly)
