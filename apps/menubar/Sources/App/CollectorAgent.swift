@@ -9,8 +9,10 @@ enum CollectorAgent {
 
     // Builds run straight from the repo have no collector. Checked on disk, since status
     // reports .notFound both for that and for an agent that was never registered.
+    private static var binaryPath: String { Bundle.main.bundlePath + "/Contents/MacOS/claude-telemetry-collector" }
+
     static var isBundled: Bool {
-        FileManager.default.isExecutableFile(atPath: Bundle.main.bundlePath + "/Contents/MacOS/claude-telemetry-collector")
+        FileManager.default.isExecutableFile(atPath: binaryPath)
     }
 
     // Why the last register or unregister failed, for the panel's offline hint.
@@ -22,9 +24,12 @@ enum CollectorAgent {
 
     // launchd keeps running the binary it started, so a new build or a moved app must register
     // again. Otherwise an update would keep talking to the old collector until the next login.
+    // The binary's date catches local rebuilds, which keep the same build number.
     private static var registration: String {
         let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? ""
-        return "\(build) \(Bundle.main.bundlePath)"
+        let modified = (try? FileManager.default.attributesOfItem(atPath: binaryPath)[.modificationDate] as? Date)?
+            .timeIntervalSince1970 ?? 0
+        return "\(build) \(Bundle.main.bundlePath) \(Int(modified))"
     }
 
     // Launch and the Settings toggle can overlap across an await, so changes run one at a time.

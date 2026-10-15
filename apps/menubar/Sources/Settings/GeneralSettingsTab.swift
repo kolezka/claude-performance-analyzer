@@ -4,7 +4,6 @@ import SwiftUI
 struct GeneralSettingsTab: View {
     @Bindable var model: Telemetry
     @AppStorage(Prefs.Key.enabledWindows) private var enabledWindowsRaw = Prefs.Defaults.enabledWindowsRaw
-    @AppStorage(Prefs.Key.keepDetailOpen) private var keepDetailOpen = Prefs.Defaults.keepDetailOpen
     @State private var loginItemEnabled = SMAppService.mainApp.status == .enabled
     @State private var loginItemError: String?
     @State private var runCollector = CollectorAgent.isWanted
@@ -43,9 +42,6 @@ struct GeneralSettingsTab: View {
                 ForEach(Prefs.WindowOption.allCases) { option in
                     Toggle(option.label, isOn: windowBinding(option))
                 }
-            }
-            Section("Detail Card") {
-                Toggle("Keep detail card open when panel closes", isOn: $keepDetailOpen)
             }
         }
         .formStyle(.grouped)

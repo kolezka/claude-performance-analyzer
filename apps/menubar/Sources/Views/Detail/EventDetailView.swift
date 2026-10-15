@@ -132,6 +132,9 @@ struct EventDetailView: View {
                 .foregroundStyle(.secondary)
                 .help("Copy session id")
             }
+            if let kindLabel = session.kindLabel {
+                Text(kindLabel).font(.caption).foregroundStyle(.secondary)
+            }
             if let terminal = session.terminal {
                 Label(terminal, systemImage: "terminal").font(.caption).foregroundStyle(.secondary)
             }
