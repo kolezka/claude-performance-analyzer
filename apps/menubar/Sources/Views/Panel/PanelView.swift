@@ -13,6 +13,7 @@ struct PanelView: View {
     @State private var contentHeight: CGFloat = 0
     @State private var headerHeight: CGFloat = 0
     @State private var footerHeight: CGFloat = 0
+    @State private var screenHeight: CGFloat?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -30,6 +31,7 @@ struct PanelView: View {
             footer.onGeometryChange(for: CGFloat.self) { $0.size.height } action: { footerHeight = $0 }
         }
         .padding(14)
+        .background(ScreenHeightReader { screenHeight = $0 })
         // An overlay takes the panel's size, so the card gets a fixed height to scroll in.
         .overlay { DetailOverlay(model: model, stack: $detailStack) }
         .frame(width: CGFloat(panelWidth))
@@ -74,11 +76,11 @@ struct PanelView: View {
         }
     }
 
-    // visibleFrame already excludes the menu bar and the Dock. The rest is padding, the three
-    // stack gaps, the divider and a small margin under the panel.
+    // Uses the screen the panel is on. Its visibleFrame already excludes the menu bar and the Dock.
+    // The rest is padding, the three stack gaps, the divider and a small margin under the panel.
     private var maxContentHeight: CGFloat {
-        let screenHeight = NSScreen.main?.visibleFrame.height ?? 800
-        return max(200, screenHeight - headerHeight - footerHeight - 28 - 42 - 1 - 16)
+        let available = screenHeight ?? NSScreen.main?.visibleFrame.height ?? 800
+        return max(200, available - headerHeight - footerHeight - 28 - 42 - 1 - 16)
     }
 
     // "ok" covers any API request in the last 15 minutes, which is too long to call live.
