@@ -74,7 +74,8 @@ struct WaterfallView: View {
                     .frame(width: max(timeline.x(span.endMs) - timeline.x(span.startMs), 2))
                     .offset(x: timeline.x(span.startMs))
             }
-            .frame(width: barWidth, height: rowHeight)
+            // Leading, or the bar's own narrow frame gets centered in the track before the offset.
+            .frame(width: barWidth, height: rowHeight, alignment: .leading)
 
             Text(fmtMs(span.endMs - span.startMs))
                 .font(.caption2)
@@ -92,19 +93,21 @@ struct WaterfallView: View {
     // its duration rotated to fit the narrow column.
     private func gapMarker(_ gap: TurnDetail.Gap, timeline: GapTimeline, gapWidth: CGFloat) -> some View {
         let x = labelWidth + rowSpacing + timeline.x(gap.startMs) + gapWidth / 2
-        return ZStack {
-            Path { path in
-                path.move(to: CGPoint(x: 0, y: 0))
-                path.addLine(to: CGPoint(x: 0, y: chartHeight))
-            }
-            .stroke(Color.secondary.opacity(0.6), style: StrokeStyle(lineWidth: 1, dash: [2, 2]))
+        // The label is an overlay: its unrotated width would otherwise widen the frame and
+        // shift the line off the gap.
+        return Path { path in
+            path.move(to: CGPoint(x: gapWidth / 2, y: 0))
+            path.addLine(to: CGPoint(x: gapWidth / 2, y: chartHeight))
+        }
+        .stroke(Color.secondary.opacity(0.6), style: StrokeStyle(lineWidth: 1, dash: [2, 2]))
+        .frame(width: gapWidth, height: chartHeight)
+        .overlay {
             Text("idle \(fmtMs(gap.endMs - gap.startMs))")
                 .font(.system(size: 8))
                 .foregroundStyle(.secondary)
                 .fixedSize()
                 .rotationEffect(.degrees(-90))
         }
-        .frame(width: gapWidth, height: chartHeight)
         .position(x: x, y: chartHeight / 2)
         .help("Idle for \(fmtMs(gap.endMs - gap.startMs))")
     }
