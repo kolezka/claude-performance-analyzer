@@ -225,30 +225,62 @@ function guarded<T extends (req: Request) => Response | Promise<Response>>(handl
   return (req: Request) => (isOwnHost(req) ? handler(req) : new Response("Forbidden", { status: 403 }));
 }
 
-const server = Bun.serve({
-  port: PORT,
-  hostname: "127.0.0.1",
-  routes: {
-    "/": dashboard,
-    "/v1/logs": { POST: ingest("logs", parseLogs, store.addEvents, broadcast) },
-    "/v1/traces": { POST: ingest("traces", parseTraces, store.addSpans) },
-    "/v1/metrics": { POST: ingest("metrics", parseMetrics, store.addMetrics) },
-    "/api/summary": guarded((req) => Response.json(summaryFor(windowFrom(new URL(req.url))))),
-    "/api/status": guarded(() => Response.json(status(summaryFor(15 * 60_000)))),
-    "/api/live": guarded(() => Response.json(recentLive(60))),
-    "/api/turn": guarded((req) => Response.json(turnTimeline(store.promptEvents(new URL(req.url).searchParams.get("prompt"))))),
-    "/api/event": guarded(eventDetail),
-    "/api/item": guarded(itemDetail),
-    "/api/setup": { GET: guarded(setup), POST: setup },
-    "/ws": (req, srv) => (srv.upgrade(req) ? undefined : new Response("WebSocket upgrade required", { status: 426 })),
-  },
-  websocket: {
-    open: (ws) => {
-      ws.subscribe("live");
+// Browsers always send Origin on a WebSocket, so a foreign one means another site's page.
+// Non-browser clients send none and get the same Host check as the GET endpoints.
+function isOwnSocket(req: Request): boolean {
+  const origin = req.headers.get("origin");
+  return isOwnHost(req) && (origin === null || OWN_HOSTS.some((h) => origin === `http://${h}`));
+}
+
+function serve() {
+  return Bun.serve({
+    port: PORT,
+    hostname: "127.0.0.1",
+    routes: {
+      "/": dashboard,
+      "/v1/logs": { POST: ingest("logs", parseLogs, store.addEvents, broadcast) },
+      "/v1/traces": { POST: ingest("traces", parseTraces, store.addSpans) },
+      "/v1/metrics": { POST: ingest("metrics", parseMetrics, store.addMetrics) },
+      "/api/summary": guarded((req) => Response.json(summaryFor(windowFrom(new URL(req.url))))),
+      "/api/status": guarded(() => Response.json(status(summaryFor(15 * 60_000)))),
+      "/api/live": guarded(() => Response.json(recentLive(60))),
+      "/api/turn": guarded((req) => Response.json(turnTimeline(store.promptEvents(new URL(req.url).searchParams.get("prompt"))))),
+      "/api/event": guarded(eventDetail),
+      "/api/item": guarded(itemDetail),
+      "/api/setup": { GET: guarded(setup), POST: setup },
+      "/ws": (req, srv) => {
+        if (!isOwnSocket(req)) return new Response("Forbidden", { status: 403 });
+        return srv.upgrade(req) ? undefined : new Response("WebSocket upgrade required", { status: 426 });
+      },
     },
-    message: () => {},
-  },
-  development: process.env.NODE_ENV !== "production" ? { hmr: false, console: true } : false,
-});
+    websocket: {
+      open: (ws) => {
+        ws.subscribe("live");
+      },
+      message: () => {},
+    },
+    development: process.env.NODE_ENV !== "production" ? { hmr: false, console: true } : false,
+  });
+}
+
+const isPortTaken = (err: unknown) => (err as { code?: string }).code === "EADDRINUSE";
+
+// launchd sets CC_WAIT_FOR_PORT for the collector bundled in the app. If another collector
+// holds the port, this one waits and takes over once it stops, instead of exiting for good.
+async function serveWhenFree() {
+  let logged = false;
+  for (;;) {
+    try {
+      return serve();
+    } catch (err) {
+      if (!isPortTaken(err) || !process.env.CC_WAIT_FOR_PORT) throw err;
+      if (!logged) console.error(`port ${PORT} is in use, probably by another collector. Waiting for it.`);
+      logged = true;
+      await Bun.sleep(1000);
+    }
+  }
+}
+
+const server = await serveWhenFree();
 
 console.log(`claude telemetry collector on ${server.url} (data: ${DATA_DIR})`);
