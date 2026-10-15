@@ -1,8 +1,8 @@
 import { expect, test } from "bun:test";
 import { existsSync, lstatSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
-import { applyEnv, planEnv, telemetryEnv } from "../src";
+import { applyEnv, claudeDir, planEnv, telemetryEnv } from "../src";
 
 const wanted = telemetryEnv(4318);
 const tmp = () => mkdtempSync(join(tmpdir(), "cc-settings-"));
@@ -79,4 +79,25 @@ test("creates settings.json when absent", () => {
   const out = applyEnv(path, wanted);
   expect(out.backup).toBeNull();
   expect(JSON.parse(readFileSync(path, "utf8")).env).toEqual(wanted);
+});
+
+test("claudeDir honors CC_CLAUDE_DIR, then CLAUDE_CONFIG_DIR, then falls back to ~/.claude", () => {
+  const prevCcClaude = process.env.CC_CLAUDE_DIR;
+  const prevConfigDir = process.env.CLAUDE_CONFIG_DIR;
+  try {
+    delete process.env.CC_CLAUDE_DIR;
+    delete process.env.CLAUDE_CONFIG_DIR;
+    expect(claudeDir()).toBe(join(homedir(), ".claude"));
+
+    process.env.CLAUDE_CONFIG_DIR = "/configured/claude-dir";
+    expect(claudeDir()).toBe("/configured/claude-dir");
+
+    process.env.CC_CLAUDE_DIR = "/override/claude-dir";
+    expect(claudeDir()).toBe("/override/claude-dir");
+  } finally {
+    if (prevCcClaude === undefined) delete process.env.CC_CLAUDE_DIR;
+    else process.env.CC_CLAUDE_DIR = prevCcClaude;
+    if (prevConfigDir === undefined) delete process.env.CLAUDE_CONFIG_DIR;
+    else process.env.CLAUDE_CONFIG_DIR = prevConfigDir;
+  }
 });

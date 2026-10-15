@@ -20,6 +20,8 @@ export interface SessionInfo {
   lastMs: number;
   prompts: number;
   costUsd: number;
+  kind: "interactive" | "headless";
+  kindLabel: string;
 }
 
 function num(v: unknown): number {
@@ -54,6 +56,8 @@ export function buildSessionInfo(sessionId: string, events: EventRow[], home: st
   let lastMs = -Infinity;
   let prompts = 0;
   let costUsd = 0;
+  const querySources = new Set<string>();
+  let sawNonInteractiveTerminal = false;
 
   for (const e of events) {
     firstMs = Math.min(firstMs, e.tsMs);
@@ -61,6 +65,7 @@ export function buildSessionInfo(sessionId: string, events: EventRow[], home: st
     const a = e.attrs;
     if (!terminal && typeof a["terminal.type"] === "string") terminal = a["terminal.type"];
     if (!claudeVersion && typeof a["service.version"] === "string") claudeVersion = a["service.version"];
+    if (a["terminal.type"] === "non-interactive") sawNonInteractiveTerminal = true;
 
     const headBranch = a["vcs.ref.head.name"];
     if (typeof headBranch === "string" && e.tsMs >= branchMs) {
@@ -73,6 +78,7 @@ export function buildSessionInfo(sessionId: string, events: EventRow[], home: st
     if (e.name === "api_request") {
       if (typeof a.model === "string") models.add(a.model);
       costUsd += num(a.cost_usd);
+      if (typeof a.query_source === "string") querySources.add(a.query_source);
     }
 
     if (e.name === "tool_result") {
@@ -97,6 +103,18 @@ export function buildSessionInfo(sessionId: string, events: EventRow[], home: st
 
   const ranked = [...rootHits.values()].sort((x, y) => y.count - x.count || y.lastMs - x.lastMs);
   const top = ranked[0] ?? null;
+  const modelsArr = [...models];
+
+  // Interactive: at least one api_request came from the REPL's own thread. Headless: an "sdk"
+  // query source with no REPL thread (claude -p spawned by a plugin), or a non-interactive
+  // terminal. Default to interactive when there is no evidence either way.
+  const kind: SessionInfo["kind"] = querySources.has("repl_main_thread")
+    ? "interactive"
+    : querySources.has("sdk") || sawNonInteractiveTerminal
+      ? "headless"
+      : "interactive";
+  const kindLabel =
+    kind === "interactive" ? (terminal ? `Interactive · ${terminal}` : "Interactive") : modelsArr.length ? `Headless (SDK) · ${modelsArr[0]}` : "Headless (SDK)";
 
   return {
     sessionId,
@@ -106,10 +124,12 @@ export function buildSessionInfo(sessionId: string, events: EventRow[], home: st
     branch,
     terminal,
     claudeVersion,
-    models: [...models],
+    models: modelsArr,
     firstMs,
     lastMs,
     prompts,
     costUsd,
+    kind,
+    kindLabel,
   };
 }

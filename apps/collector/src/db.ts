@@ -63,6 +63,26 @@ export function openStore(path: string) {
         .all(sinceMs, name)
         .map(eventRow);
     },
+    // hook_execution_complete rows whose hook label (hook_name, falling back to hook_event,
+    // falling back to "unknown") equals `label`, matching hookLabel()'s own fallback exactly.
+    // Every hook type shares the "hook_execution_complete" event name, so a 24h window can hold
+    // many times more rows than match one label; json_extract() rejects the rest in SQLite
+    // itself; a row that is not the label we want is never even JSON.parse'd into a JS object.
+    hookEventsByLabel(sinceMs: number, label: string): EventRow[] {
+      return db
+        .query(
+          `SELECT ${EVENT_COLUMNS} FROM events
+           WHERE ts_ms >= ? AND name = 'hook_execution_complete'
+           AND (
+             json_extract(attrs, '$.hook_name') = ?
+             OR (json_extract(attrs, '$.hook_name') IS NULL AND json_extract(attrs, '$.hook_event') = ?)
+             OR (json_extract(attrs, '$.hook_name') IS NULL AND json_extract(attrs, '$.hook_event') IS NULL AND ? = 'unknown')
+           )
+           ORDER BY ts_ms`,
+        )
+        .all(sinceMs, label, label, label)
+        .map(eventRow);
+    },
     // Most recent prompt when no id is given.
     promptEvents(promptId: string | null): EventRow[] {
       const id =
@@ -92,6 +112,16 @@ export function openStore(path: string) {
       return db
         .query(`SELECT ${EVENT_COLUMNS} FROM events WHERE session_id = ? AND name IN (${placeholders}) ORDER BY ts_ms`)
         .all(sessionId, ...names)
+        .map(eventRow);
+    },
+    // One event name across several sessions, no time filter: hook_registered fires once at
+    // session start, which can be well before the window an /api/item query is asking about.
+    eventsByNameForSessions(name: string, sessionIds: string[]): EventRow[] {
+      if (sessionIds.length === 0) return [];
+      const placeholders = sessionIds.map(() => "?").join(",");
+      return db
+        .query(`SELECT ${EVENT_COLUMNS} FROM events WHERE name = ? AND session_id IN (${placeholders}) ORDER BY ts_ms`)
+        .all(name, ...sessionIds)
         .map(eventRow);
     },
     spans(sinceMs: number): SpanRow[] {

@@ -20,13 +20,14 @@ const pal: Palette = {
 
 const turn: TurnTimeline = {
   promptId: "p1",
+  sessionId: "s1",
   command: "/test",
   startMs: 1000,
   endMs: 5000,
   spans: [
-    { kind: "api", label: "claude-sonnet-5", startMs: 1000, endMs: 3000, ok: true },
-    { kind: "tool", label: "Bash", startMs: 3000, endMs: 4000, ok: false },
-    { kind: "hook", label: "PreToolUse", startMs: 4000, endMs: 4500, ok: true },
+    { kind: "api", label: "claude-sonnet-5", startMs: 1000, endMs: 3000, ok: true, id: null, detail: null },
+    { kind: "tool", label: "Bash", startMs: 3000, endMs: 4000, ok: false, id: 42, detail: "echo hi" },
+    { kind: "hook", label: "PreToolUse", startMs: 4000, endMs: 4500, ok: true, id: null, detail: "Bash" },
   ],
 };
 

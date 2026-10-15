@@ -22,6 +22,14 @@ export function settingsPath(): string {
   return process.env.CC_SETTINGS_PATH ?? join(process.env.CLAUDE_CONFIG_DIR ?? join(homedir(), ".claude"), "settings.json");
 }
 
+// The ~/.claude directory itself, for readers that need more than settings.json (plugin
+// config, installed_plugins.json). Overridable so tests never touch the real one. Honors
+// CLAUDE_CONFIG_DIR too, same as settingsPath() above, so the two never disagree about where
+// a relocated config directory lives; CC_CLAUDE_DIR takes precedence when both are set.
+export function claudeDir(): string {
+  return process.env.CC_CLAUDE_DIR ?? process.env.CLAUDE_CONFIG_DIR ?? join(homedir(), ".claude");
+}
+
 // Only key names leave this module. The env block holds secrets such as ANTHROPIC_AUTH_TOKEN.
 export interface EnvPlan {
   path: string;
