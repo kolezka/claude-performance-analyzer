@@ -72,7 +72,7 @@ test("buildHookDefinitions resolves plugin, project and local config for the mat
 
   const repoRoot = mkdtempSync(join(tmpdir(), "cc-hook-repo-"));
   mkdirSync(join(repoRoot, ".claude"), { recursive: true });
-  writeFileSync(join(repoRoot, ".claude", "settings.json"), JSON.stringify({ hooks: { PreToolUse: [{ matcher: "Bash", hooks: [{ type: "command", command: "echo project-hook" }] }] } }));
+  writeFileSync(join(repoRoot, ".claude", "settings.json"), JSON.stringify({ hooks: { PreToolUse: [{ matcher: "Bash", hooks: [{ type: "command", command: "echo project-hook", timeout: 15 }] }] } }));
   writeFileSync(join(repoRoot, ".claude", "settings.local.json"), JSON.stringify({ hooks: { PreToolUse: [{ matcher: "Bash", hooks: [{ type: "command", command: "echo local-hook" }] }] } }));
 
   const prevDir = process.env.CC_CLAUDE_DIR;
@@ -88,10 +88,10 @@ test("buildHookDefinitions resolves plugin, project and local config for the mat
 
     expect(defs.map((d) => d.source)).toEqual(["plugin", "project", "local"]);
     const plugin = defs.find((d) => d.source === "plugin")!;
-    expect(plugin).toMatchObject({ plugin: "my-plugin", matcher: "Bash", command: 'bun "${CLAUDE_PLUGIN_ROOT}/hooks/guard.sh"', summary: "bun guard.sh", sessions: 1 });
+    expect(plugin).toMatchObject({ plugin: "my-plugin", matcher: "Bash", command: 'bun "${CLAUDE_PLUGIN_ROOT}/hooks/guard.sh"', summary: "bun guard.sh", sessions: 1, timeoutSec: null });
     expect(plugin.configPath).toContain("hooks.json");
     const project = defs.find((d) => d.source === "project")!;
-    expect(project).toMatchObject({ command: "echo project-hook", sessions: 1 });
+    expect(project).toMatchObject({ command: "echo project-hook", sessions: 1, timeoutSec: 15 });
     const local = defs.find((d) => d.source === "local")!;
     expect(local).toMatchObject({ command: "echo local-hook", sessions: 1 });
   } finally {

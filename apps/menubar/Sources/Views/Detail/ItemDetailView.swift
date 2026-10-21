@@ -1,6 +1,8 @@
 import SwiftUI
 
 struct ItemDetailView: View {
+    enum CallList: Hashable { case slowest, errors, recent }
+
     @Bindable var model: Telemetry
     let kind: StatsKind
     let name: String
@@ -10,16 +12,42 @@ struct ItemDetailView: View {
     @State private var loadError: String?
     @State private var isLoading = false
     @State private var expandedDefinition: Int?
+    @State private var selectedPattern: String?
+    @State private var callList: CallList?
     @AppStorage(Prefs.Key.hideHeadlessSessions) private var hideHeadlessSessions = Prefs.Defaults.hideHeadlessSessions
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             header
-            if let detail {
+            // A failed reload keeps the earlier data on screen, so say it is stale.
+            if detail != nil, let loadError {
+                Label("Couldn't refresh, showing earlier data: \(loadError)", systemImage: "exclamationmark.triangle")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+            }
+            if let detail, kind == .hooks {
+                statGrid(detail)
+                if let finding = detail.finding { findingCallout(finding) }
+                headlessToggle(detail)
+                if let patterns = detail.patterns, !patterns.isEmpty { patternsSection(patterns) }
+                if let selectedPattern {
+                    HStack(spacing: 6) {
+                        let label = detail.patterns?.first { $0.key == selectedPattern }?.label ?? selectedPattern
+                        Text("Showing only \(label)").font(.caption).foregroundStyle(.secondary)
+                        Button("Clear") { self.selectedPattern = nil }.controlSize(.small)
+                    }
+                }
+                hookCallsSection(detail)
+                hooksSection(detail)
+                DisclosureGroup {
+                    repoSection(detail, title: nil)
+                } label: {
+                    SectionTitle("By repository")
+                }
+            } else if let detail {
                 statGrid(detail)
                 headlessToggle(detail)
-                repoSection(detail)
-                if kind == .hooks { hooksSection(detail) }
+                repoSection(detail, title: "By repository")
                 if let failed = detail.failed, !failed.isEmpty { failedSection(failed) }
                 recentSection(detail)
             } else if let loadError {
@@ -34,7 +62,7 @@ struct ItemDetailView: View {
             }
             refreshBar
         }
-        .task(id: "\(kind.rawValue)/\(name)/\(model.minutes)/\(hideHeadlessSessions)") { await load() }
+        .task(id: "\(kind.rawValue)/\(name)/\(model.minutes)/\(hideHeadlessSessions)/\(selectedPattern ?? "")") { await load() }
     }
 
     private var header: some View {
@@ -73,7 +101,11 @@ struct ItemDetailView: View {
             Toggle("Hide headless SDK sessions", isOn: $hideHeadlessSessions)
                 .toggleStyle(.checkbox)
                 .font(.caption)
-            if let headlessCount = d.headlessCount, headlessCount > 0 {
+            if let hidden = d.hiddenByHeadless {
+                Text("Hiding \(hidden.calls) call\(hidden.calls == 1 ? "" : "s") (\(hidden.errors) error\(hidden.errors == 1 ? "" : "s")) from headless sessions.")
+                    .font(.caption2)
+                    .foregroundStyle(hidden.errors > 0 ? Color.orange : Color.secondary)
+            } else if let headlessCount = d.headlessCount, headlessCount > 0 {
                 Text(
                     hideHeadlessSessions
                         ? "\(headlessCount) calls from headless sessions hidden."
@@ -85,9 +117,9 @@ struct ItemDetailView: View {
         }
     }
 
-    private func repoSection(_ d: ItemDetail) -> some View {
+    private func repoSection(_ d: ItemDetail, title: String?) -> some View {
         VStack(alignment: .leading, spacing: 4) {
-            SectionTitle("By repository")
+            if let title { SectionTitle(title) }
             if d.repos.isEmpty {
                 Text("No repository data.").font(.callout).foregroundStyle(.secondary)
             } else {
@@ -115,26 +147,134 @@ struct ItemDetailView: View {
         }
     }
 
+    private func findingCallout(_ finding: String) -> some View {
+        Label(finding, systemImage: "exclamationmark.triangle")
+            .font(.callout)
+            .padding(8)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 6))
+    }
+
+    private func patternsSection(_ patterns: [ItemDetail.Pattern]) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            SectionTitle("Patterns")
+            ForEach(patterns, id: \.key) { pattern in
+                let selected = selectedPattern == pattern.key
+                Button {
+                    selectedPattern = selected ? nil : pattern.key
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: selected ? "line.3.horizontal.decrease.circle.fill" : "circle")
+                            .foregroundStyle(selected ? Color.accentColor : Color.secondary)
+                            .font(.caption)
+                        Text(pattern.label).foregroundStyle(pattern.errors > 0 ? Color.orange : Color.primary)
+                        Spacer(minLength: 8)
+                        Text("\(pattern.count) · p95 \(fmtMs(pattern.p95))").foregroundStyle(.secondary)
+                    }
+                    .font(.callout)
+                    .monospacedDigit()
+                    .contentShape(.rect)
+                }
+                .buttonStyle(.plain)
+                .hoverRow()
+                .help(selected ? "Show all calls" : "Show only calls with this pattern")
+            }
+        }
+    }
+
+    private func hookCallsSection(_ d: ItemDetail) -> some View {
+        let hasSlowest = d.slowest != nil
+        let current = callList ?? (hasSlowest ? .slowest : .recent)
+        let calls: [ItemDetail.Recent] =
+            switch current {
+            case .slowest: d.slowest ?? []
+            case .errors: d.failed ?? []
+            case .recent: d.recent
+            }
+        return VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                SectionTitle("Calls")
+                Spacer()
+                Picker("Calls", selection: Binding(get: { current }, set: { callList = $0 })) {
+                    if hasSlowest { Text("Slowest").tag(CallList.slowest) }
+                    Text("Errors").tag(CallList.errors)
+                    Text("Recent").tag(CallList.recent)
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .controlSize(.mini)
+                .fixedSize()
+            }
+            if calls.isEmpty {
+                Text(current == .errors ? "No calls with errors." : "No calls.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            } else {
+                hookCallRows(calls)
+            }
+        }
+    }
+
+    private func hookCallRows(_ calls: [ItemDetail.Recent]) -> some View {
+        ForEach(calls, id: \.id) { call in
+            Button { openCall(call) } label: {
+                HStack(spacing: 6) {
+                    Text(date(call.tsMs), format: .dateTime.hour().minute().second())
+                        .foregroundStyle(.tertiary)
+                    Text(call.ms.map(fmtMs) ?? "Not captured")
+                        .foregroundStyle(call.ms == nil ? .tertiary : .primary)
+                    if let pattern = call.pattern {
+                        Text(pattern).foregroundStyle(call.ok ? Color.secondary : Color.red).lineLimit(1)
+                    }
+                    if let sessionKind = call.sessionKind {
+                        Text(sessionKind.capitalized)
+                            .font(.caption2.weight(.semibold))
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 1)
+                            .background(.secondary.opacity(0.15), in: .capsule)
+                            .foregroundStyle(.secondary)
+                            .help(call.launcher.map { "Launched by \($0)" } ?? (call.sessionLabel ?? ""))
+                    }
+                    Spacer(minLength: 8)
+                    Text(call.folder.map(abbreviateHome) ?? "Folder not recorded")
+                        .monospaced()
+                        .foregroundStyle(call.folder == nil ? .tertiary : .secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .help(call.folder ?? "Folder not recorded")
+                }
+                .font(.callout)
+                .monospacedDigit()
+                .contentShape(.rect)
+            }
+            .buttonStyle(.plain)
+            .hoverRow()
+        }
+    }
+
     private func hooksSection(_ d: ItemDetail) -> some View {
         VStack(alignment: .leading, spacing: 4) {
-            SectionTitle("Hooks in this group")
+            HStack(alignment: .firstTextBaseline) {
+                SectionTitle("Hooks in this group")
+                Text("Current configuration").font(.caption2).foregroundStyle(.tertiary)
+            }
             let definitions = d.definitions ?? []
             if definitions.isEmpty {
                 Text("No registered hooks found for this event in these sessions.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
             } else {
+                // An older collector sends no patterns and no timeouts, so it gets no timeout line
+                // rather than a "No timeout set" it never reported.
+                let knowsTimeouts = d.patterns != nil
                 ForEach(Array(definitions.enumerated()), id: \.offset) { index, def in
-                    definitionRow(index, def)
+                    definitionRow(index, def, showTimeout: knowsTimeouts)
                 }
             }
-            Text("Telemetry reports time per group, not per script. Failures count hooks that returned a non-blocking error; the failing script is not reported.")
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
         }
     }
 
-    private func definitionRow(_ index: Int, _ def: ItemDetail.Definition) -> some View {
+    private func definitionRow(_ index: Int, _ def: ItemDetail.Definition, showTimeout: Bool) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             Button {
                 withAnimation(panelAnimation()) {
@@ -151,6 +291,11 @@ struct ItemDetailView: View {
                     }
                     Text(def.summary).font(.callout).monospaced().lineLimit(1).truncationMode(.middle)
                     Spacer(minLength: 8)
+                    if showTimeout {
+                        Text(def.timeoutSec.map { "Timeout: \(fmtSeconds($0))" } ?? "No timeout set")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
                     Text("in \(def.sessions) session\(def.sessions == 1 ? "" : "s")")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
@@ -255,11 +400,6 @@ struct ItemDetailView: View {
                     }
                     .font(.callout)
                     .monospacedDigit()
-                    if let hooks = call.hooks {
-                        Text("\(hooks.count) hook\(hooks.count == 1 ? "" : "s") · \(hooks.errors) error\(hooks.errors == 1 ? "" : "s") · \(hooks.stdoutChars / 1000)k stdout")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                    }
                 }
                 .contentShape(.rect)
             }
@@ -270,7 +410,9 @@ struct ItemDetailView: View {
     }
 
     private func openCall(_ call: ItemDetail.Recent) {
-        if let promptId = call.promptId {
+        if kind == .hooks {
+            onPush(.hookCall(id: call.id))
+        } else if let promptId = call.promptId {
             onPush(.turn(promptId: promptId))
         } else {
             onPush(.event(id: call.id))
@@ -281,10 +423,16 @@ struct ItemDetailView: View {
         isLoading = true
         defer { isLoading = false }
         do {
-            let d = try await model.fetchItem(kind: kind, name: name, excludeHeadless: hideHeadlessSessions)
+            let d = try await model.fetchItem(
+                kind: kind, name: name, excludeHeadless: hideHeadlessSessions, pattern: kind == .hooks ? selectedPattern : nil)
             guard !Task.isCancelled else { return }
             detail = d
             loadError = nil
+            // A pattern can drop out of the window or the headless filter; a filter nobody can
+            // see would empty the list, so clear it (this reloads unfiltered).
+            if let selected = selectedPattern, let patterns = d.patterns, !patterns.contains(where: { $0.key == selected }) {
+                selectedPattern = nil
+            }
         } catch {
             guard !Task.isCancelled else { return }
             loadError = error.localizedDescription

@@ -112,3 +112,67 @@ test("/api/item: excludeHeadless, the no-repo bucket split by session kind, and 
   expect(filtered.repos[0]!.label).toBe("No repo · interactive sessions");
   expect(filtered.failed).toHaveLength(0);
 });
+
+function promptHook(tsAgoMs: number, sessionId: string, ms: number, success: number, errors: number) {
+  return record("hook_execution_complete", tsAgoMs, sessionId, {
+    hook_event: s("UserPromptSubmit"),
+    hook_name: s("UserPromptSubmit"),
+    num_hooks: i(3),
+    num_success: i(success),
+    num_non_blocking_error: i(errors),
+    num_blocking: i(0),
+    num_cancelled: i(0),
+    total_duration_ms: i(ms),
+  });
+}
+
+test("/api/item hooks: patterns, finding line, slowest, launcher, hidden-by-headless and the pattern filter", async () => {
+  const interactive = "drill-interactive";
+  const headlessA = "drill-headless-a";
+  const headlessB = "drill-headless-b";
+  const logRecords = [
+    record("api_request", 9000, interactive, { query_source: s("repl_main_thread"), model: s("claude-sonnet-5") }),
+    record("api_request", 9000, headlessA, { query_source: s("sdk"), model: s("claude-sonnet-5") }),
+    record("api_request", 9000, headlessB, { query_source: s("sdk"), model: s("claude-sonnet-5") }),
+    record("user_prompt", 8500, headlessA, { launcher: s("self-improvement-loop") }),
+    record("user_prompt", 8500, headlessB, { launcher: s("self-improvement-loop") }),
+    promptHook(8000, interactive, 300, 3, 0),
+    promptHook(7000, interactive, 400, 3, 0),
+    promptHook(6000, interactive, 900, 3, 0),
+    promptHook(5000, headlessA, 250, 2, 1),
+    promptHook(4000, headlessB, 280, 2, 1),
+  ];
+  const res = await fetch(`${collector.url}/v1/logs`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ resourceLogs: [{ scopeLogs: [{ logRecords }] }] }),
+  });
+  expect(res.status).toBe(200);
+
+  const base = `${collector.url}/api/item?kind=hooks&name=UserPromptSubmit&minutes=1440`;
+  const body = await (await fetch(base)).json();
+  expect(body.patterns.map((p: any) => p.label)).toEqual(["3/3 OK", "2/3 OK · 1 error"]);
+  expect(body.finding).toBe("2 calls reported errors, all headless, launched by self-improvement-loop. Failing script not reported.");
+  expect(body.slowest[0].ms).toBe(900);
+  expect(body.slowest).toHaveLength(5);
+  expect(body.failed).toHaveLength(2);
+  expect(body.failed.every((f: any) => f.launcher === "self-improvement-loop")).toBe(true);
+  expect(body.failed[0].pattern).toBe("2/3 OK · 1 error");
+  expect(body.hiddenByHeadless).toBeNull();
+
+  const hidden = await (await fetch(`${base}&excludeHeadless=1`)).json();
+  expect(hidden.hiddenByHeadless).toEqual({ calls: 2, errors: 2 });
+  expect(hidden.finding).toBeNull();
+  expect(hidden.patterns.map((p: any) => p.label)).toEqual(["3/3 OK"]);
+
+  const failingKey = body.patterns.find((p: any) => p.errors > 0).key;
+  const filtered = await (await fetch(`${base}&pattern=${encodeURIComponent(failingKey)}`)).json();
+  expect(filtered.count).toBe(2);
+  // Patterns and finding still describe the whole (headless-filtered) set, not the pattern slice.
+  expect(filtered.patterns).toHaveLength(2);
+
+  // Other kinds do not get the hook-only fields.
+  const tools = await (await fetch(`${collector.url}/api/item?kind=tools&name=Bash&minutes=1440`)).json();
+  expect(tools.patterns).toBeUndefined();
+  expect(tools.slowest).toBeUndefined();
+});

@@ -251,7 +251,11 @@ final class Telemetry {
         try await get("api/event?id=\(id)")
     }
 
-    func fetchItem(kind: StatsKind, name: String, excludeHeadless: Bool) async throws -> ItemDetail {
+    func fetchHookCall(id: Int) async throws -> HookCallDetail {
+        try await get("api/hook-call?id=\(id)")
+    }
+
+    func fetchItem(kind: StatsKind, name: String, excludeHeadless: Bool, pattern: String? = nil) async throws -> ItemDetail {
         var components = URLComponents()
         components.path = "api/item"
         components.queryItems = [
@@ -260,6 +264,7 @@ final class Telemetry {
             URLQueryItem(name: "minutes", value: String(minutes)),
             URLQueryItem(name: "excludeHeadless", value: excludeHeadless ? "1" : "0"),
         ]
+        if let pattern { components.queryItems?.append(URLQueryItem(name: "pattern", value: pattern)) }
         return try await get(components.string!)
     }
 

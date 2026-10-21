@@ -7,6 +7,11 @@ func fmtMs(_ ms: Double) -> String {
     return String(format: "%.1fh", ms / 3_600_000)
 }
 
+// Whole seconds without a decimal ("30s"), otherwise one decimal ("2.5s").
+func fmtSeconds(_ s: Double) -> String {
+    s.rounded() == s ? "\(Int(s))s" : String(format: "%.1fs", s)
+}
+
 func date(_ ms: Double) -> Date {
     Date(timeIntervalSince1970: ms / 1000)
 }

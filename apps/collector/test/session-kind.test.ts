@@ -45,3 +45,10 @@ test("repl_main_thread wins even alongside an sdk request in the same session", 
   )!;
   expect(info.kind).toBe("interactive");
 });
+
+test("launcher is the first non-empty launcher attr across the session's events, else null", () => {
+  const tagged = buildSessionInfo("sess", [row("api_request", 0, { launcher: "" }), row("user_prompt", 1, { launcher: "x" }), row("tool_result", 2, { launcher: "y" })], "/home/me")!;
+  expect(tagged.launcher).toBe("x");
+  const plain = buildSessionInfo("sess", [row("api_request", 0, { query_source: "sdk" })], "/home/me")!;
+  expect(plain.launcher).toBeNull();
+});
