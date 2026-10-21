@@ -152,6 +152,10 @@ struct HookCallDetailView: View {
                 ForEach(Array(d.candidates.scripts.enumerated()), id: \.offset) { _, script in
                     scriptRow(script)
                 }
+            case "unresolved":
+                Text("This session registered hooks for this event, but current configuration no longer matches them.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
             default:
                 Text("No hook registrations seen for this session.")
                     .font(.callout)

@@ -19,11 +19,24 @@ struct ItemDetailView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             header
+            // A failed reload keeps the earlier data on screen, so say it is stale.
+            if detail != nil, let loadError {
+                Label("Couldn't refresh, showing earlier data: \(loadError)", systemImage: "exclamationmark.triangle")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+            }
             if let detail, kind == .hooks {
                 statGrid(detail)
                 if let finding = detail.finding { findingCallout(finding) }
                 headlessToggle(detail)
                 if let patterns = detail.patterns, !patterns.isEmpty { patternsSection(patterns) }
+                if let selectedPattern {
+                    HStack(spacing: 6) {
+                        let label = detail.patterns?.first { $0.key == selectedPattern }?.label ?? selectedPattern
+                        Text("Showing only \(label)").font(.caption).foregroundStyle(.secondary)
+                        Button("Clear") { self.selectedPattern = nil }.controlSize(.small)
+                    }
+                }
                 hookCallsSection(detail)
                 hooksSection(detail)
                 DisclosureGroup {
@@ -415,6 +428,11 @@ struct ItemDetailView: View {
             guard !Task.isCancelled else { return }
             detail = d
             loadError = nil
+            // A pattern can drop out of the window or the headless filter; a filter nobody can
+            // see would empty the list, so clear it (this reloads unfiltered).
+            if let selected = selectedPattern, let patterns = d.patterns, !patterns.contains(where: { $0.key == selected }) {
+                selectedPattern = nil
+            }
         } catch {
             guard !Task.isCancelled else { return }
             loadError = error.localizedDescription

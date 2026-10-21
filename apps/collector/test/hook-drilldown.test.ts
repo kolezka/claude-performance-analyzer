@@ -64,6 +64,11 @@ test("candidates: matched, mismatch, none", () => {
   expect(candidates(call({ count: 1, success: 1 }), []).status).toBe("none");
 });
 
+test("candidates: registrations seen but current config resolves none is unresolved, not none", () => {
+  expect(candidates(call({ count: 1, success: 1 }), [], 2).status).toBe("unresolved");
+  expect(candidates(call({ count: 1, success: 1 }), [], 0).status).toBe("none");
+});
+
 test("narrowingHint rules out scripts whose timeout is below the duration", () => {
   const defs = [def("self-improvement-loop", 5), def("hindsight", 30), def("security-guidance", null)];
   expect(narrowingHint(25_523, "matched", defs)).toBe(

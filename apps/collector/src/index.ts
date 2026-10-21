@@ -24,7 +24,7 @@ import {
 import { applyEnv, planEnv, settingsPath, telemetryEnv } from "@cpa/claude-settings";
 import { BoundedCache } from "./bounded-cache";
 import { candidates, findingLine, narrowingHint, patternKey, patternLabel, summarizePatterns, type HookPattern } from "./hook-drilldown";
-import { buildHookDefinitions, hookCallFromAttrs, type HookCall, type HookDefinition } from "./hooks";
+import { buildHookDefinitions, hookCallFromAttrs, splitHookItemName, type HookCall, type HookDefinition } from "./hooks";
 import { gitRoot, type RepoInfo } from "./repos";
 import { branchAsOf, buildSessionInfo, repoAsOf, SESSION_EVENT_NAMES, type SessionInfo } from "./sessions";
 
@@ -313,7 +313,9 @@ function hookCallDetail(req: Request) {
   const info = row.sessionId ? sessionInfoFor(row.sessionId) : null;
   const registrations = row.sessionId ? store.eventsByNameForSessions("hook_registered", [row.sessionId]) : [];
   const defs = buildHookDefinitions(name, registrations, (sessionId) => repoFor(sessionId)?.root ?? null);
-  const found = candidates(hookCallFromAttrs(row.attrs), defs);
+  const event = splitHookItemName(name).event;
+  const registered = registrations.filter((r) => r.attrs.hook_event === event).length;
+  const found = candidates(hookCallFromAttrs(row.attrs), defs, registered);
   const call = toRecent("hooks", row);
 
   return Response.json({

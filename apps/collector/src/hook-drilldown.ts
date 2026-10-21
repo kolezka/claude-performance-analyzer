@@ -56,11 +56,12 @@ export function findingLine(rows: { call: HookCall; headless: boolean; launcher:
   return `${calls}${kinds}. Failing script not reported.`;
 }
 
-export type CandidateStatus = "matched" | "mismatch" | "none";
+export type CandidateStatus = "matched" | "mismatch" | "unresolved" | "none";
 
 // The session's registered scripts only count as "ran in this call" when the numbers agree.
-export function candidates(call: HookCall, sessionDefs: HookDefinition[]): { status: CandidateStatus; scripts: HookDefinition[] } {
-  if (!sessionDefs.length) return { status: "none", scripts: [] };
+// "unresolved": the session did register hooks, but current config no longer explains them.
+export function candidates(call: HookCall, sessionDefs: HookDefinition[], registered = 0): { status: CandidateStatus; scripts: HookDefinition[] } {
+  if (!sessionDefs.length) return { status: registered > 0 ? "unresolved" : "none", scripts: [] };
   return { status: call.count === sessionDefs.length ? "matched" : "mismatch", scripts: sessionDefs };
 }
 
