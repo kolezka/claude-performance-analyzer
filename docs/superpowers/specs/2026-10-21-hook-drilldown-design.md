@@ -129,12 +129,41 @@ fields are optional, so older collectors keep working (existing convention in `D
   configured timeout and "Not captured" for duration and status.
 - When nothing more can be known, a short "How to capture this" note pointing at stage 2/3.
 
+## Stage 1b: who launched a headless session
+
+Added after the 2026-10-21 investigation. Finding the launcher took a manual walk through `ps`,
+launchd and plists; the window should answer it directly.
+
+What was found (verified): the 163 failing headless calls came from the self-improvement-loop
+worker (launchd `com.raqz.sil-worker` runs `sil worker --once`, which runs `claude -p
+--no-session-persistence`). Its baked PATH had no `node`, so the hindsight hook (`node
+claude-hook.js`) failed with exit 127 in every run. The PATH fix lives in self-improvement-loop.
+
+Mechanism (verified with a live probe): Claude Code copies `OTEL_RESOURCE_ATTRIBUTES` onto every
+event it exports, and the collector already merges resource attrs into event attrs
+(`packages/otlp/src/json.ts:77`). A run started with `OTEL_RESOURCE_ATTRIBUTES=launcher=X` shows
+`launcher: "X"` on its `hook_execution_complete` events.
+
+Collector and UI:
+
+- Read `launcher` from event attrs, per session (first non-empty value wins).
+- Session context in the hook call detail shows "Launched by: X" (recorded). Without the attr:
+  "Launcher not reported", plus a short hint that a launcher can set `OTEL_RESOURCE_ATTRIBUTES`.
+- Call rows and the finding line may group headless calls by launcher (for example "163 errors,
+  all headless, launched by self-improvement-loop").
+- self-improvement-loop tags its `claude -p` runs with `launcher=self-improvement-loop` (done in
+  that repo, same change set as the PATH fix).
+
+Note: `terminal.type` is `iTerm.app` for a `claude -p` started from an iTerm shell, so
+"headless" in this app means "no terminal", not "any `-p` run". The launcher attr is the reliable
+way to tell scripted runs apart.
+
 ## Stage 2: one manual diagnostic run (not code)
 
 Run one headless session from the same launcher that produces the failing sessions with
 `--debug=hooks --debug-file <path>` and read which script fails and why. This is separate evidence
-about a new run. It is never attached to old calls as proof. Open question for the user: what
-launches the headless sessions.
+about a new run. It is never attached to old calls as proof. The launcher is now known (stage 1b);
+the remaining check is that worker runs show 0 hook errors once the PATH fix is installed.
 
 ## Stage 3: per-script run log (after stage 1 ships)
 
