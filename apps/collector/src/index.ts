@@ -23,7 +23,7 @@ import {
 } from "@cpa/analytics";
 import { applyEnv, planEnv, settingsPath, telemetryEnv } from "@cpa/claude-settings";
 import { BoundedCache } from "./bounded-cache";
-import { findingLine, patternKey, patternLabel, summarizePatterns, type HookPattern } from "./hook-drilldown";
+import { candidates, findingLine, narrowingHint, patternKey, patternLabel, summarizePatterns, type HookPattern } from "./hook-drilldown";
 import { buildHookDefinitions, hookCallFromAttrs, type HookCall, type HookDefinition } from "./hooks";
 import { gitRoot, type RepoInfo } from "./repos";
 import { branchAsOf, buildSessionInfo, repoAsOf, SESSION_EVENT_NAMES, type SessionInfo } from "./sessions";
@@ -301,6 +301,36 @@ function itemDetail(req: Request) {
   });
 }
 
+// One hook call with its session context and the scripts that session registered for the
+// event. The scripts come from current configuration, so they are candidates, not proof.
+function hookCallDetail(req: Request) {
+  const id = Number(new URL(req.url).searchParams.get("id"));
+  if (!Number.isFinite(id)) return new Response("Not Found", { status: 404 });
+  const row = store.event(id);
+  if (!row || row.name !== "hook_execution_complete") return new Response("Not Found", { status: 404 });
+
+  const name = itemKey("hooks", row.attrs);
+  const info = row.sessionId ? sessionInfoFor(row.sessionId) : null;
+  const registrations = row.sessionId ? store.eventsByNameForSessions("hook_registered", [row.sessionId]) : [];
+  const defs = buildHookDefinitions(name, registrations, (sessionId) => repoFor(sessionId)?.root ?? null);
+  const found = candidates(hookCallFromAttrs(row.attrs), defs);
+  const call = toRecent("hooks", row);
+
+  return Response.json({
+    call,
+    name,
+    session: {
+      kindLabel: info?.kindLabel ?? null,
+      terminal: info?.terminal ?? null,
+      claudeVersion: info?.claudeVersion ?? null,
+      launcher: info?.launcher ?? null,
+      sessionId: row.sessionId,
+    },
+    candidates: found,
+    hint: narrowingHint(call.ms, found.status, found.scripts),
+  });
+}
+
 function turnsList(req: Request) {
   const url = new URL(req.url);
   const since = Date.now() - windowFrom(url);
@@ -434,6 +464,7 @@ function serve() {
       "/api/turns": guarded(turnsList),
       "/api/event": guarded(eventDetail),
       "/api/item": guarded(itemDetail),
+      "/api/hook-call": guarded(hookCallDetail),
       "/api/setup": { GET: guarded(setup), POST: setup },
       "/ws": (req, srv) => {
         if (!isOwnSocket(req)) return new Response("Forbidden", { status: 403 });
