@@ -23,6 +23,7 @@ import {
 } from "@cpa/analytics";
 import { applyEnv, planEnv, settingsPath, telemetryEnv } from "@cpa/claude-settings";
 import { BoundedCache } from "./bounded-cache";
+import { findingLine, patternKey, patternLabel, summarizePatterns, type HookPattern } from "./hook-drilldown";
 import { buildHookDefinitions, hookCallFromAttrs, type HookCall, type HookDefinition } from "./hooks";
 import { gitRoot, type RepoInfo } from "./repos";
 import { branchAsOf, buildSessionInfo, repoAsOf, SESSION_EVENT_NAMES, type SessionInfo } from "./sessions";
@@ -162,6 +163,8 @@ interface Recent {
   sessionLabel: string | null;
   branch: string | null;
   hooks: HookCall | null;
+  pattern: string | null;
+  launcher: string | null;
   folder: string | null;
   worktree: boolean;
 }
@@ -173,6 +176,7 @@ function toRecent(kind: ItemKind, e: EventRow): Recent {
   // timestamp, not the session's all-time dominant one a long session can have since moved on
   // from (e.g. a hook call logged after the session's work already shifted to another repo).
   const asOfRepo = info ? repoAsOf(info, e.tsMs, e.promptId) : null;
+  const hooks = kind === "hooks" ? hookCallFromAttrs(e.attrs) : null;
   return {
     id: e.id as number,
     tsMs: e.tsMs,
@@ -185,7 +189,9 @@ function toRecent(kind: ItemKind, e: EventRow): Recent {
     sessionKind: info?.kind ?? null,
     sessionLabel: info?.kindLabel ?? null,
     branch: info ? branchAsOf(info, e.tsMs, e.promptId) : null,
-    hooks: kind === "hooks" ? hookCallFromAttrs(e.attrs) : null,
+    hooks,
+    pattern: hooks ? patternLabel(hooks) : null,
+    launcher: info?.launcher ?? null,
     folder: folderFor(asOfRepo),
     worktree: asOfRepo?.worktree != null,
   };
@@ -207,7 +213,30 @@ function itemDetail(req: Request) {
   const allRows = candidates.filter((e) => itemKey(kind, e.attrs) === name);
 
   const headlessCount = allRows.filter((e) => sessionKindFor(e.sessionId) === "headless").length;
-  const rows = excludeHeadless ? allRows.filter((e) => sessionKindFor(e.sessionId) !== "headless") : allRows;
+  const visibleRows = excludeHeadless ? allRows.filter((e) => sessionKindFor(e.sessionId) !== "headless") : allRows;
+
+  // Hook-only views. Patterns and the finding describe every visible row, so picking a
+  // pattern narrows the lists below without changing the summary it was picked from.
+  const isHooks = kind === "hooks";
+  let hookExtras: { patterns: HookPattern[]; finding: string | null; hiddenByHeadless: { calls: number; errors: number } | null } | null = null;
+  if (isHooks) {
+    const patterns = summarizePatterns(visibleRows.map((e) => ({ call: hookCallFromAttrs(e.attrs), ms: itemDurationMs(kind, e.attrs) })));
+    const finding = findingLine(
+      visibleRows.map((e) => ({
+        call: hookCallFromAttrs(e.attrs),
+        headless: sessionKindFor(e.sessionId) === "headless",
+        launcher: e.sessionId ? (sessionInfoFor(e.sessionId)?.launcher ?? null) : null,
+      })),
+    );
+    let hiddenByHeadless: { calls: number; errors: number } | null = null;
+    if (excludeHeadless) {
+      const hidden = allRows.filter((e) => sessionKindFor(e.sessionId) === "headless");
+      hiddenByHeadless = { calls: hidden.length, errors: hidden.filter((e) => itemFailed(kind, e.attrs)).length };
+    }
+    hookExtras = { patterns, finding, hiddenByHeadless };
+  }
+  const pattern = isHooks ? url.searchParams.get("pattern") : null;
+  const rows = pattern ? visibleRows.filter((e) => patternKey(hookCallFromAttrs(e.attrs)) === pattern) : visibleRows;
 
   const durations = rows.map((e) => itemDurationMs(kind, e.attrs)).sort((a, b) => a - b);
   const failures = rows.filter((e) => itemFailed(kind, e.attrs)).length;
@@ -236,14 +265,20 @@ function itemDetail(req: Request) {
   const recent = sortedRecent.slice(0, 10).map((e) => toRecent(kind, e));
   const failed = sortedRecent
     .filter((e) => itemFailed(kind, e.attrs))
-    .slice(0, 10)
+    .slice(0, isHooks ? 15 : 10)
     .map((e) => toRecent(kind, e));
+  const slowest = isHooks
+    ? [...rows]
+        .sort((a, b) => itemDurationMs(kind, b.attrs) - itemDurationMs(kind, a.attrs))
+        .slice(0, 15)
+        .map((e) => toRecent(kind, e))
+    : null;
 
   const definitions: HookDefinition[] =
     kind === "hooks"
       ? buildHookDefinitions(
           name,
-          store.eventsByNameForSessions("hook_registered", [...new Set(rows.map((e) => e.sessionId).filter((s): s is string => s !== null))]),
+          store.eventsByNameForSessions("hook_registered", [...new Set(visibleRows.map((e) => e.sessionId).filter((s): s is string => s !== null))]),
           (sessionId) => repoFor(sessionId)?.root ?? null,
         )
       : [];
@@ -262,6 +297,7 @@ function itemDetail(req: Request) {
     recent,
     failed,
     definitions,
+    ...(hookExtras ? { ...hookExtras, slowest } : {}),
   });
 }
 

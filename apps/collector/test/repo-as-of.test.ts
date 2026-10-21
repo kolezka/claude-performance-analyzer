@@ -13,6 +13,7 @@ function sessionInfo(overrides: Partial<SessionInfo> = {}): SessionInfo {
     branch: "main",
     terminal: null,
     claudeVersion: null,
+    launcher: null,
     models: [],
     firstMs: 0,
     lastMs: 0,
