@@ -27,6 +27,8 @@ export interface HookDefinition {
   summary: string;
   sessions: number;
   configPath: string | null;
+  // Configured timeout in seconds; null when the entry sets none.
+  timeoutSec: number | null;
 }
 
 function num(v: unknown): number {
@@ -228,7 +230,8 @@ function definitionsFromEntries(
     for (const hook of hooks) {
       if (!hook || typeof hook !== "object" || Array.isArray(hook) || typeof hook.type !== "string") continue;
       const command = typeof hook.command === "string" ? hook.command : null;
-      out.push({ source, plugin, matcher, type: hook.type, command, summary: hookSummary(command ?? ""), sessions, configPath });
+      const timeoutSec = typeof hook.timeout === "number" && Number.isFinite(hook.timeout) && hook.timeout > 0 ? hook.timeout : null;
+      out.push({ source, plugin, matcher, type: hook.type, command, summary: hookSummary(command ?? ""), sessions, configPath, timeoutSec });
     }
   }
   return out;
