@@ -73,7 +73,8 @@ Rule:
 
 - Candidate scripts for a call are the scripts that call's session registered for that event
   (`hook_registered` rows for the session ID), resolved against current configuration. Fall back
-  to the item-wide list only when the session has no registrations, and say so.
+  to nothing when the session has no registrations: show "No hook registrations seen for this
+  session" rather than guessing from other sessions.
 - When the call's `num_hooks` equals the candidate count, show the candidates as "ran in this
   call", still labelled current configuration.
 - When it does not match (for example a 1-hook call with three candidates), show "1 hook ran,
