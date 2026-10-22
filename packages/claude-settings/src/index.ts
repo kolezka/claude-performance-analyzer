@@ -4,18 +4,21 @@ import { homedir } from "node:os";
 import { applyEdits, modify, parse, printParseErrorCode, type ParseError } from "jsonc-parser";
 import { dirname, join } from "node:path";
 
-export function telemetryEnv(port: number): Record<string, string> {
-  return {
+// A number is a local port. A string is the full endpoint, used as given (remote hosts).
+export function telemetryEnv(endpoint: number | string, headers?: string): Record<string, string> {
+  const env: Record<string, string> = {
     CLAUDE_CODE_ENABLE_TELEMETRY: "1",
     OTEL_LOGS_EXPORTER: "otlp",
     OTEL_METRICS_EXPORTER: "otlp",
     OTEL_EXPORTER_OTLP_PROTOCOL: "http/json",
-    OTEL_EXPORTER_OTLP_ENDPOINT: `http://127.0.0.1:${port}`,
+    OTEL_EXPORTER_OTLP_ENDPOINT: typeof endpoint === "number" ? `http://127.0.0.1:${endpoint}` : endpoint,
     OTEL_LOGS_EXPORT_INTERVAL: "1000",
     OTEL_LOG_TOOL_DETAILS: "1",
     CLAUDE_CODE_ENHANCED_TELEMETRY_BETA: "1",
     OTEL_TRACES_EXPORTER: "otlp",
   };
+  if (headers !== undefined) env.OTEL_EXPORTER_OTLP_HEADERS = headers;
+  return env;
 }
 
 export function settingsPath(): string {

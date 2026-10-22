@@ -77,6 +77,7 @@ test("ingested logs are pushed to WebSocket clients and kept in the live backlog
   ws.close();
   expect(msg).not.toBeNull();
   expect(msg.type).toBe("events");
+  expect(msg.host).toBe("local");
   expect(msg.events).toEqual([expect.objectContaining({ kind: "hook", label: "PreToolUse:Bash", ms: 1234, sessionId: "live-1" })]);
 
   const backlog = await (await fetch(`${collector.url}/api/live`)).json();

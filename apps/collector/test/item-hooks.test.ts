@@ -151,6 +151,7 @@ test("/api/item hooks: patterns, finding line, slowest, launcher, hidden-by-head
 
   const base = `${collector.url}/api/item?kind=hooks&name=UserPromptSubmit&minutes=1440`;
   const body = await (await fetch(base)).json();
+  expect(Array.isArray(body.patterns)).toBe(true);
   expect(body.patterns.map((p: any) => p.label)).toEqual(["3/3 OK", "2/3 OK · 1 error"]);
   expect(body.finding).toBe("2 calls reported errors, all headless, launched by self-improvement-loop. Failing script not reported.");
   expect(body.slowest[0].ms).toBe(900);

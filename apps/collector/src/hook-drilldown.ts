@@ -56,7 +56,7 @@ export function findingLine(rows: { call: HookCall; headless: boolean; launcher:
   return `${calls}${kinds}. Failing script not reported.`;
 }
 
-export type CandidateStatus = "matched" | "mismatch" | "unresolved" | "none";
+export type CandidateStatus = "matched" | "mismatch" | "unresolved" | "remote" | "none";
 
 // The session's registered scripts only count as "ran in this call" when the numbers agree.
 // "unresolved": the session did register hooks, but current config no longer explains them.

@@ -36,7 +36,7 @@ struct TurnDetailView: View {
             }
             refreshBar
         }
-        .task(id: promptId) { await load() }
+        .task(id: "\(model.selectionGeneration)/\(promptId)") { await load() }
     }
 
     private var refreshBar: some View {
@@ -53,7 +53,7 @@ struct TurnDetailView: View {
         VStack(alignment: .leading, spacing: 3) {
             if let folder = d.folder {
                 HStack(spacing: 8) {
-                    Text(abbreviateHome(folder))
+                    Text(displayPath(folder, hostId: model.selectedHostId))
                         .font(.headline)
                         .monospaced()
                         .lineLimit(1)
@@ -114,17 +114,19 @@ struct TurnDetailView: View {
         }
     }
 
+    // Also runs from Refresh, outside .task, so it checks the generation itself.
     private func load() async {
+        let generation = model.selectionGeneration
         isLoading = true
         defer { isLoading = false }
         do {
             let d = try await model.fetchTurn(promptId: promptId)
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled, generation == model.selectionGeneration else { return }
             detail = d
             notFound = d == nil
             loadError = nil
         } catch {
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled, !Telemetry.isStale(error), generation == model.selectionGeneration else { return }
             loadError = error.localizedDescription
         }
     }

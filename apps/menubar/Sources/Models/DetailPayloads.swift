@@ -95,7 +95,11 @@ struct ItemDetail: Decodable {
         let summary: String
         let sessions: Int
         let configPath: String?
-        // Nil when no timeout is set, or from an older collector.
+        // Sent for remote hosts only: the registered hook event and source as telemetry reported
+        // them. Remote definitions never carry a command or config path.
+        let hookEvent: String?
+        let hookSource: String?
+        // Nil when unset, unavailable remotely, or from an older collector.
         let timeoutSec: Double?
     }
     struct Pattern: Decodable {
@@ -141,7 +145,7 @@ struct HookCallDetail: Decodable {
         let sessionId: String?
     }
     struct Candidates: Decodable {
-        // "matched", "mismatch" or "none".
+        // "matched", "mismatch", "unresolved", "remote" or "none".
         let status: String
         let scripts: [ItemDetail.Definition]
     }

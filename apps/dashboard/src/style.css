@@ -100,6 +100,11 @@ h1 { font-size: 17px; margin: 0; font-weight: 700; letter-spacing: -0.01em; }
 h2 { font-size: 13px; margin: 0 0 10px; font-weight: 600; color: var(--ink); letter-spacing: -0.005em; }
 .muted { color: var(--muted); }
 #updated { margin-left: auto; font-size: 11px; }
+#host-pick { display: flex; align-items: center; gap: 6px; font-size: 12px; }
+#host-pick select {
+  font: inherit; color: var(--ink); background: var(--glass); border: 1px solid var(--glass-rim); border-radius: 999px; padding: 3px 10px;
+  box-shadow: var(--glass-hi);
+}
 nav { display: flex; gap: 2px; padding: 2px; border-radius: 999px; }
 nav button {
   border: 0; background: transparent; color: var(--ink-2); padding: 3px 12px; border-radius: 999px; font: inherit; cursor: pointer;
@@ -175,3 +180,30 @@ button.primary {
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35), 0 4px 12px color-mix(in srgb, var(--api) 35%, transparent);
 }
 button.primary:disabled { opacity: 0.6; cursor: default; }
+
+#hosts p { margin: 6px 0; }
+#hosts summary { cursor: pointer; list-style: none; }
+#hosts summary::-webkit-details-marker { display: none; }
+#hosts summary h2 { display: inline; margin: 0; }
+#hosts summary h2::before { content: "\25B8  "; color: var(--muted); }
+#hosts[open] summary h2::before { content: "\25BE  "; }
+#hosts[open] summary { margin-bottom: 8px; }
+#hosts .bad { color: var(--critical); }
+#hosts .ok { color: var(--ink); }
+#hosts .ok::before { content: "\2713  "; color: var(--hooks); font-weight: 700; }
+#hosts .warn::before { content: "\26A0  "; color: var(--warn); }
+#hosts button:not(.primary) {
+  font: inherit; color: var(--ink-2); background: var(--glass); border: 1px solid var(--glass-rim); border-radius: 999px; padding: 4px 12px; cursor: pointer;
+}
+#hosts button:not(.primary):disabled { opacity: 0.6; cursor: default; }
+#hosts button.danger { color: var(--critical); }
+.host-list { list-style: none; margin: 0 0 8px; padding: 0; }
+.host-list li { display: flex; align-items: center; gap: 10px; padding: 5px 0; border-bottom: 1px solid var(--grid); flex-wrap: wrap; }
+.host-list .host-name { font-weight: 600; overflow-wrap: anywhere; }
+.host-list .host-actions { margin-left: auto; display: flex; gap: 6px; }
+.host-add { display: flex; gap: 8px; align-items: center; margin-top: 8px; }
+.host-add input {
+  font: inherit; color: var(--ink); background: var(--page); border: 1px solid var(--border); border-radius: 8px; padding: 5px 9px; width: min(260px, 100%);
+}
+.reveal { margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--grid); }
+.reveal pre { white-space: pre-wrap; overflow-wrap: anywhere; user-select: all; }

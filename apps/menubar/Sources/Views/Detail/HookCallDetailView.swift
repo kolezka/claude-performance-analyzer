@@ -37,7 +37,7 @@ struct HookCallDetailView: View {
             }
             refreshBar
         }
-        .task(id: id) { await load() }
+        .task(id: "\(model.selectionGeneration)/\(id)") { await load() }
     }
 
     private var refreshBar: some View {
@@ -101,7 +101,7 @@ struct HookCallDetailView: View {
             .font(.caption)
             contextRow("Session kind", d.session.kindLabel ?? "Not captured", missing: d.session.kindLabel == nil)
             contextRow("Terminal", d.session.terminal ?? "Not captured", missing: d.session.terminal == nil)
-            contextRow("Folder", d.call.folder.map(abbreviateHome) ?? "Folder not recorded", missing: d.call.folder == nil)
+            contextRow("Folder", d.call.folder.map { displayPath($0, hostId: model.selectedHostId) } ?? "Folder not recorded", missing: d.call.folder == nil)
             contextRow("Branch", d.call.branch ?? "Not captured", missing: d.call.branch == nil)
             contextRow("Claude Code", d.session.claudeVersion ?? "Not captured", missing: d.session.claudeVersion == nil)
             if let launcher = d.session.launcher {
@@ -134,10 +134,17 @@ struct HookCallDetailView: View {
     private func scriptsSection(_ d: HookCallDetail) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(alignment: .firstTextBaseline) {
-                SectionTitle("Scripts")
-                Text("Current configuration").font(.caption2).foregroundStyle(.tertiary)
+                SectionTitle(model.isRemoteSelected ? "Registrations" : "Scripts")
+                Text(model.isRemoteSelected ? "Remote telemetry" : "Current configuration").font(.caption2).foregroundStyle(.tertiary)
             }
             switch d.candidates.status {
+            case "remote":
+                Text("Commands and timeouts are not available from remote telemetry.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                ForEach(Array(d.candidates.scripts.enumerated()), id: \.offset) { _, script in
+                    scriptRow(script)
+                }
             case "matched":
                 ForEach(Array(d.candidates.scripts.enumerated()), id: \.offset) { _, script in
                     scriptRow(script)
@@ -157,7 +164,7 @@ struct HookCallDetailView: View {
                     .font(.callout)
                     .foregroundStyle(.secondary)
             default:
-                Text("No hook registrations seen for this session.")
+                Text("No matching hook registrations seen for this call.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
             }
@@ -185,13 +192,24 @@ struct HookCallDetailView: View {
                     .truncationMode(.middle)
                     .help(command)
             }
-            HStack(spacing: 10) {
-                Text(script.timeoutSec.map { "Timeout: \(fmtSeconds($0))" } ?? "No timeout set")
-                    .foregroundStyle(.secondary)
-                Text("Duration: Not captured").foregroundStyle(.tertiary)
-                Text("Status: Not captured").foregroundStyle(.tertiary)
+            if model.isRemoteSelected {
+                if let event = script.hookEvent {
+                    Text(event + (script.matcher.map { ": \($0)" } ?? ""))
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                if let source = script.hookSource {
+                    Text(source).font(.caption2).foregroundStyle(.tertiary)
+                }
+            } else {
+                HStack(spacing: 10) {
+                    Text(script.timeoutSec.map { "Timeout: \(fmtSeconds($0))" } ?? "No timeout set")
+                        .foregroundStyle(.secondary)
+                    Text("Duration: Not captured").foregroundStyle(.tertiary)
+                    Text("Status: Not captured").foregroundStyle(.tertiary)
+                }
+                .font(.caption2)
             }
-            .font(.caption2)
         }
         .padding(.vertical, 2)
     }
@@ -207,15 +225,16 @@ struct HookCallDetailView: View {
     }
 
     private func load() async {
+        let generation = model.selectionGeneration
         isLoading = true
         defer { isLoading = false }
         do {
             let d = try await model.fetchHookCall(id: id)
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled, generation == model.selectionGeneration else { return }
             detail = d
             loadError = nil
         } catch {
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled, !Telemetry.isStale(error), generation == model.selectionGeneration else { return }
             loadError = error.localizedDescription
         }
     }

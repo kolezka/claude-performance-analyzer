@@ -27,6 +27,10 @@ export class BoundedCache<V> {
     }
   }
 
+  clear() {
+    this.map.clear();
+  }
+
   get size() {
     return this.map.size;
   }

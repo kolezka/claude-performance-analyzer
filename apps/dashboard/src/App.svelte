@@ -6,10 +6,12 @@
   import DataTable from "./DataTable.svelte";
   import Kpi from "./Kpi.svelte";
   import Legend from "./Legend.svelte";
+  import Hosts from "./Hosts.svelte";
   import Live from "./Live.svelte";
   import Setup from "./Setup.svelte";
   import { PARTS, WF_ROW_H, WF_VISIBLE_ROWS, breakdownOption, latencyOption, palette, promptsOption, statBarOption, waterfallOption, waterfallTitle } from "./charts";
   import { clock, compact, pct, usd } from "./format";
+  import { LOCAL_HOST, LOCAL_HOST_ID, RequestGate, apiUrl, hostFromSearch, hostName, reconcileSelection, searchWithHost, type Host } from "./hosts";
 
   function safeGet(key: string): string | null {
     try {
@@ -38,6 +40,51 @@
   let selectedPromptId: string | null = null;
   let turn = $state<TurnTimeline | null>(null);
 
+  let hostId = $state(hostFromSearch(location.search));
+  let hosts = $state<Host[]>([LOCAL_HOST]);
+  let hostsError = $state<string | null>(null);
+  let hostsLoaded = false;
+  // HTTP status of the last failed summary load; null means the collector did not answer at all.
+  let loadErrorStatus = $state<number | null>(null);
+  let selectedName = $derived(hostName(hosts, hostId));
+  // Everything loaded for the selected host goes through this gate, so a switch drops late answers.
+  const gate = new RequestGate();
+  // Host list requests have their own gate: only the newest list may decide the selection.
+  const hostsGate = new RequestGate();
+
+  function selectHost(id: string, history: "push" | "replace" | "none" = "push") {
+    // The URL is fixed even when the host stays the same, e.g. Back to a removed host while on This Mac.
+    if (history !== "none" && hostFromSearch(location.search) !== id) {
+      const url = `${location.pathname}${searchWithHost(location.search, id)}${location.hash}`;
+      if (history === "push") window.history.pushState(null, "", url);
+      else window.history.replaceState(null, "", url);
+    }
+    if (id === hostId) return;
+    gate.invalidate();
+    hostId = id;
+    summary = null;
+    turn = null;
+    selectedPromptId = null;
+    loadError = null;
+    updatedText = "";
+    load();
+  }
+
+  async function refreshHosts() {
+    hostsGate.invalidate();
+    await hostsGate.run<Host[]>(fetch, "/api/hosts", {
+      ok: (list) => {
+        hostsError = null;
+        hostsLoaded = true;
+        hosts = list;
+        const next = reconcileSelection(hostId, list);
+        if (next !== hostId) selectHost(next, "replace");
+      },
+      // Keep the selection: a failed list says nothing about whether the host still exists.
+      fail: (error) => (hostsError = error),
+    });
+  }
+
   function selectWindow(m: number) {
     minutes = m;
     safeSet("window", String(m));
@@ -46,24 +93,24 @@
   }
 
   async function load() {
-    try {
-      const res = await fetch(`/api/summary?minutes=${minutes}`);
-      const s = (await res.json()) as Summary;
-      summary = s;
-      loadError = null;
-      updatedText = `${s.eventCount} events · ${clock(s.generatedAt)}`;
-      if (!selectedPromptId && s.eventCount > 0) loadTurn();
-    } catch (err) {
-      loadError = String(err);
-    }
+    await gate.run<Summary>(fetch, apiUrl("/api/summary", hostId, { minutes }), {
+      ok: (s) => {
+        summary = s;
+        loadError = null;
+        updatedText = `${s.eventCount} events · ${clock(s.generatedAt)}`;
+        if (!selectedPromptId && s.eventCount > 0) loadTurn();
+      },
+      fail: (error, status) => {
+        loadError = error;
+        loadErrorStatus = status;
+        // Probably deleted in another client: check the list now instead of at the next refresh.
+        if (status === 404 && hostId !== LOCAL_HOST_ID) refreshHosts();
+      },
+    });
   }
 
   async function loadTurn(promptId?: string) {
-    try {
-      const url = promptId ? `/api/turn?prompt=${encodeURIComponent(promptId)}` : "/api/turn";
-      const res = await fetch(url);
-      turn = (await res.json()) as TurnTimeline | null;
-    } catch {}
+    await gate.run<TurnTimeline | null>(fetch, apiUrl("/api/turn", hostId, { prompt: promptId }), { ok: (t) => (turn = t) });
   }
 
   function selectPrompt(promptId: string) {
@@ -72,22 +119,38 @@
   }
 
   // Pushed events trigger a refresh; batch bursts so the summary query runs at most twice a second.
-  let pending: ReturnType<typeof setTimeout> | null = null;
   function loadSoon() {
-    if (pending) return;
-    pending = setTimeout(() => {
-      pending = null;
-      load();
-    }, 500);
+    gate.soon(load, 500);
   }
 
   onMount(() => {
-    load();
+    // A remote host from the URL is checked against the list first, so a deleted one falls back
+    // to This Mac instead of flashing an error. This Mac loads at once, as before.
+    if (hostId === LOCAL_HOST_ID) {
+      load();
+      refreshHosts();
+    } else {
+      const requested = hostId;
+      // If the list dropped the host, selectHost already loaded This Mac.
+      refreshHosts().then(() => {
+        if (hostId === requested) load();
+      });
+    }
+    const onPop = () => {
+      const wanted = hostFromSearch(location.search);
+      const next = hostsLoaded ? reconcileSelection(wanted, hosts) : wanted;
+      selectHost(next, next === wanted ? "none" : "replace");
+    };
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
   });
 
   // Fallback for when the socket is down, and to roll the time window forward.
   $effect(() => {
-    const id = setInterval(load, 30_000);
+    const id = setInterval(() => {
+      load();
+      refreshHosts();
+    }, 30_000);
     return () => clearInterval(id);
   });
 
@@ -164,17 +227,40 @@
       <button data-min={m} class:on={minutes === m} onclick={() => selectWindow(m)}>{label}</button>
     {/each}
   </nav>
+  <label id="host-pick">
+    <span class="muted">Host</span>
+    <select value={hostId} onchange={(e) => selectHost(e.currentTarget.value)}>
+      {#if !hosts.some((h) => h.id === hostId)}
+        <option value={hostId}>Loading...</option>
+      {/if}
+      {#each hosts as h (h.id)}
+        <option value={h.id}>{h.name}</option>
+      {/each}
+    </select>
+  </label>
   <span id="updated" class="muted">{updatedText}</span>
 </header>
 
 <Setup />
-<Live onData={loadSoon} />
+<Hosts {hosts} listError={hostsError} onChanged={refreshHosts} />
+<Live {hostId} onData={loadSoon} />
 
 <main id="app">
   {#if loadError}
-    <div class="card"><h2>Collector unreachable</h2><p class="muted">{loadError}</p></div>
+    <div class="card">
+      <h2>{loadErrorStatus === null ? "Collector unreachable" : `Could not load ${selectedName}`}</h2>
+      <p class="muted">{loadError}</p>
+    </div>
   {:else if !summary}
     <p class="muted">Loading...</p>
+  {:else if summary.eventCount === 0 && hostId !== LOCAL_HOST_ID}
+    <div class="card">
+      <h2>No telemetry from {selectedName} yet</h2>
+      <p class="muted">
+        Paste the env block shown when this host was added into <code>~/.claude/settings.json</code> on that machine, then restart Claude Code there. The
+        token is shown only once: if it is lost, regenerate it under Remote hosts.
+      </p>
+    </div>
   {:else if summary.eventCount === 0}
     <div class="card">
       <h2>No telemetry yet</h2>

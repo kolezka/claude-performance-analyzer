@@ -9,6 +9,8 @@ struct SettingsView: View {
                 .tabItem { Label("General", systemImage: "gearshape") }
             ConnectionSettingsTab(model: model)
                 .tabItem { Label("Connection", systemImage: "network") }
+            HostsSettingsTab(model: model)
+                .tabItem { Label("Hosts", systemImage: "desktopcomputer") }
             MenuBarSettingsTab()
                 .tabItem { Label("Menu Bar", systemImage: "menubar.rectangle") }
             PanelSettingsTab()

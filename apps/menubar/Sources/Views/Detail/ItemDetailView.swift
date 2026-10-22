@@ -62,7 +62,7 @@ struct ItemDetailView: View {
             }
             refreshBar
         }
-        .task(id: "\(kind.rawValue)/\(name)/\(model.minutes)/\(hideHeadlessSessions)/\(selectedPattern ?? "")") { await load() }
+        .task(id: "\(model.selectionGeneration)/\(kind.rawValue)/\(name)/\(model.minutes)/\(hideHeadlessSessions)/\(selectedPattern ?? "")") { await load() }
     }
 
     private var header: some View {
@@ -236,7 +236,7 @@ struct ItemDetailView: View {
                             .help(call.launcher.map { "Launched by \($0)" } ?? (call.sessionLabel ?? ""))
                     }
                     Spacer(minLength: 8)
-                    Text(call.folder.map(abbreviateHome) ?? "Folder not recorded")
+                    Text(call.folder.map { displayPath($0, hostId: model.selectedHostId) } ?? "Folder not recorded")
                         .monospaced()
                         .foregroundStyle(call.folder == nil ? .tertiary : .secondary)
                         .lineLimit(1)
@@ -256,7 +256,7 @@ struct ItemDetailView: View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(alignment: .firstTextBaseline) {
                 SectionTitle("Hooks in this group")
-                Text("Current configuration").font(.caption2).foregroundStyle(.tertiary)
+                Text(model.isRemoteSelected ? "Remote telemetry" : "Current configuration").font(.caption2).foregroundStyle(.tertiary)
             }
             let definitions = d.definitions ?? []
             if definitions.isEmpty {
@@ -266,7 +266,7 @@ struct ItemDetailView: View {
             } else {
                 // An older collector sends no patterns and no timeouts, so it gets no timeout line
                 // rather than a "No timeout set" it never reported.
-                let knowsTimeouts = d.patterns != nil
+                let knowsTimeouts = d.patterns != nil && !model.isRemoteSelected
                 ForEach(Array(definitions.enumerated()), id: \.offset) { index, def in
                     definitionRow(index, def, showTimeout: knowsTimeouts)
                 }
@@ -326,11 +326,21 @@ struct ItemDetailView: View {
                         }
                         .padding(6)
                         .background(.quaternary.opacity(0.3), in: RoundedRectangle(cornerRadius: 5))
+                    } else if def.hookEvent != nil || def.hookSource != nil {
+                        // A remote host's hooks only exist in its own config files, which this Mac
+                        // never reads, so show what telemetry carried and nothing more.
+                        Text(["Registered as", def.hookEvent, def.hookSource.map { "from \($0)" }].compactMap { $0 }.joined(separator: " "))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .textSelection(.enabled)
+                        Text("Command and config file are not reported for remote hosts.")
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
                     } else {
                         Text("No command recorded.").font(.caption).foregroundStyle(.secondary)
                     }
                     if let configPath = def.configPath {
-                        Text(abbreviateHome(configPath))
+                        Text(displayPath(configPath, hostId: model.selectedHostId))
                             .font(.caption2)
                             .foregroundStyle(.tertiary)
                             .textSelection(.enabled)
@@ -378,7 +388,7 @@ struct ItemDetailView: View {
                         if !call.ok {
                             Image(systemName: "xmark.octagon").foregroundStyle(.red)
                         }
-                        Text(call.folder.map(abbreviateHome) ?? "folder unknown")
+                        Text(call.folder.map { displayPath($0, hostId: model.selectedHostId) } ?? "folder unknown")
                             .monospaced()
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
@@ -419,13 +429,15 @@ struct ItemDetailView: View {
         }
     }
 
+    // Also runs from Refresh, outside .task, so it checks the generation itself.
     private func load() async {
+        let generation = model.selectionGeneration
         isLoading = true
         defer { isLoading = false }
         do {
             let d = try await model.fetchItem(
                 kind: kind, name: name, excludeHeadless: hideHeadlessSessions, pattern: kind == .hooks ? selectedPattern : nil)
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled, generation == model.selectionGeneration else { return }
             detail = d
             loadError = nil
             // A pattern can drop out of the window or the headless filter; a filter nobody can
@@ -434,7 +446,7 @@ struct ItemDetailView: View {
                 selectedPattern = nil
             }
         } catch {
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled, !Telemetry.isStale(error), generation == model.selectionGeneration else { return }
             loadError = error.localizedDescription
         }
     }

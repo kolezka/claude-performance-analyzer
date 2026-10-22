@@ -32,3 +32,8 @@ func abbreviateHome(_ path: String) -> String {
     if path.hasPrefix(home) { return "~" + path.dropFirst(home.count) }
     return path
 }
+
+// A remote host's paths say nothing about this Mac's home folder, so they stay as sent.
+func displayPath(_ path: String, hostId: String) -> String {
+    hostId == TelemetryHost.localId ? abbreviateHome(path) : path
+}

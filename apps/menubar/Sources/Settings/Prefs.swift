@@ -30,6 +30,8 @@ enum Prefs {
         static let hookWarnThresholdMs = "hookWarnThresholdMs"
         static let animationsMode = "animationsMode"
         static let runCollector = "runCollector"
+        // Which collector host the panel, label and details show. Only the id, never a token.
+        static let selectedHostId = "selectedHostId"
         // Not a setting: the build and path the collector agent was last registered from.
         static let collectorRegistration = "collectorRegistration"
 
@@ -40,7 +42,7 @@ enum Prefs {
             retryDelaySec, enabledWindows, labelStyle, labelValue, offlineText, bounceIconOnSlow,
             panelWidth, showKpis, showLatencyChart, showBreakdown, showSlowest, showTotalTime,
             showLiveFeed, showWaterfall, hideHeadlessSessions, rowsPerList, liveFeedLength,
-            hideHookStartEvents, hookWarnThresholdMs, animationsMode, runCollector,
+            hideHookStartEvents, hookWarnThresholdMs, animationsMode, runCollector, selectedHostId,
             // Kind pickers inside the panel's two lists, persisted since before Settings existed.
             "slowestKind", "totalTimeKind",
         ]
@@ -63,6 +65,7 @@ enum Prefs {
         static let hideHeadlessSessions = false
         static let hookWarnThresholdMs = 2000.0
         static let runCollector = true
+        static let hostId = "local"
     }
 
     static func clamp<T: Comparable>(_ value: T, _ range: ClosedRange<T>) -> T {
@@ -88,19 +91,24 @@ enum Prefs {
         return components.url
     }
 
-    static func loadCollectorURL() -> URL {
-        let raw = UserDefaults.standard.string(forKey: Key.collectorURL) ?? Defaults.collectorURLString
+    static func loadCollectorURL(_ defaults: UserDefaults = .standard) -> URL {
+        let raw = defaults.string(forKey: Key.collectorURL) ?? Defaults.collectorURLString
         return validCollectorURL(raw) ?? defaultCollectorURL
     }
 
+    static func loadSelectedHostId(_ defaults: UserDefaults = .standard) -> String {
+        let stored = defaults.string(forKey: Key.selectedHostId) ?? ""
+        return stored.isEmpty ? Defaults.hostId : stored
+    }
+
     // Shared by the three 1...60s settings (status/panel poll interval, retry delay).
-    static func loadInterval(_ key: String, default def: Double) -> Double {
-        let stored = UserDefaults.standard.object(forKey: key) as? Double ?? def
+    static func loadInterval(_ key: String, default def: Double, _ defaults: UserDefaults = .standard) -> Double {
+        let stored = defaults.object(forKey: key) as? Double ?? def
         return clamp(stored, 1...60)
     }
 
-    static func loadRequestTimeout() -> Double {
-        let stored = UserDefaults.standard.object(forKey: Key.requestTimeoutSec) as? Double ?? Defaults.requestTimeoutSec
+    static func loadRequestTimeout(_ defaults: UserDefaults = .standard) -> Double {
+        let stored = defaults.object(forKey: Key.requestTimeoutSec) as? Double ?? Defaults.requestTimeoutSec
         return clamp(stored, 1...30)
     }
 

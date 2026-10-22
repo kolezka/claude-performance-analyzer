@@ -5,6 +5,8 @@ import { join } from "node:path";
 import type { EventRow } from "@cpa/otlp";
 import { _configCacheSizeForTests, buildHookDefinitions, hookSummary, matcherApplies, splitHookItemName } from "../src/hooks";
 
+const LOCAL = { id: "local", home: "/home/me", mayReadDisk: true };
+
 test("splitHookItemName splits event:matcher, leaving events with no target untouched", () => {
   expect(splitHookItemName("PreToolUse:Bash")).toEqual({ event: "PreToolUse", matcherTarget: "Bash" });
   expect(splitHookItemName("UserPromptSubmit")).toEqual({ event: "UserPromptSubmit", matcherTarget: null });
@@ -84,7 +86,7 @@ test("buildHookDefinitions resolves plugin, project and local config for the mat
       // A different event must never show up for a "PreToolUse:Bash" item.
       reg("s-other", { hook_event: "UserPromptSubmit", hook_type: "command", hook_source: "userSettings" }),
     ];
-    const defs = buildHookDefinitions("PreToolUse:Bash", registered, (sessionId) => (sessionId === "s-project" ? repoRoot : null));
+    const defs = buildHookDefinitions("PreToolUse:Bash", registered, (sessionId) => (sessionId === "s-project" ? repoRoot : null), LOCAL);
 
     expect(defs.map((d) => d.source)).toEqual(["plugin", "project", "local"]);
     const plugin = defs.find((d) => d.source === "plugin")!;
@@ -111,7 +113,7 @@ test("the config file cache stays bounded even after reading many distinct proje
 
   for (const root of roots) {
     const registered = [reg("s", { hook_event: "Stop", hook_type: "command", hook_source: "projectSettings" })];
-    buildHookDefinitions("Stop", registered, () => root);
+    buildHookDefinitions("Stop", registered, () => root, LOCAL);
   }
 
   expect(_configCacheSizeForTests()).toBeLessThanOrEqual(200);
@@ -125,7 +127,7 @@ test("buildHookDefinitions never throws on missing or invalid config, and emits 
   process.env.CC_CLAUDE_DIR = claudeDir;
   try {
     const registered = [reg("s1", { hook_event: "UserPromptSubmit", hook_type: "command", hook_source: "userSettings" })];
-    expect(buildHookDefinitions("UserPromptSubmit", registered, () => null)).toEqual([]);
+    expect(buildHookDefinitions("UserPromptSubmit", registered, () => null, LOCAL)).toEqual([]);
   } finally {
     if (prevDir === undefined) delete process.env.CC_CLAUDE_DIR;
     else process.env.CC_CLAUDE_DIR = prevDir;
@@ -141,7 +143,7 @@ test("buildHookDefinitions skips a malformed entry instead of throwing: valid JS
   process.env.CC_CLAUDE_DIR = claudeDir;
   try {
     const registered = [reg("s1", { hook_event: "PreToolUse", hook_type: "command", hook_source: "userSettings" })];
-    const defs = buildHookDefinitions("PreToolUse:Bash", registered, () => null);
+    const defs = buildHookDefinitions("PreToolUse:Bash", registered, () => null, LOCAL);
     expect(defs).toHaveLength(1);
     expect(defs[0]).toMatchObject({ command: "echo ok" });
   } finally {
