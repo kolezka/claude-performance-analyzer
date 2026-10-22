@@ -164,7 +164,7 @@ struct HookCallDetailView: View {
                     .font(.callout)
                     .foregroundStyle(.secondary)
             default:
-                Text("No hook registrations seen for this session.")
+                Text("No matching hook registrations seen for this call.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
             }

@@ -207,6 +207,29 @@ test("remote rows keep their transmitted paths, with no repo, worktree or config
   expect(event.session.pathTimeline.map((p: any) => p.path)).toEqual([`${repo}/src/a.ts`, "~/proj"]);
 });
 
+for (const remote of [false, true]) {
+  test(`hook-call candidates count only registrations matching this call (remote=${remote})`, async () => {
+    const { store, host, get } = setup();
+    const hostId = remote ? host.id : "local";
+    for (const matcher of ["Edit|Bash", "Edit"]) {
+      const sessionId = `matcher-${matcher}`;
+      store.addEvents([
+        { tsMs: Date.now() - 1000, name: "hook_registered", sessionId, promptId: null, attrs: { hook_event: "PreToolUse", hook_source: "userSettings", hook_matcher: matcher } },
+        { tsMs: Date.now(), name: "hook_execution_complete", sessionId, promptId: null, attrs: { hook_event: "PreToolUse", hook_name: "PreToolUse:Bash", hook_matcher: "Bash", num_hooks: 1, num_success: 1, total_duration_ms: 7 } },
+      ], hostId);
+      const id = store.sessionEvents(sessionId, hostId).find((e) => e.name === "hook_execution_complete")!.id!;
+      const body = await get(`/api/hook-call?id=${id}&host=${hostId}`);
+      if (matcher === "Edit|Bash") {
+        expect(body.candidates.status).toBe(remote ? "remote" : "matched");
+        expect(body.candidates.scripts).toHaveLength(1);
+      } else {
+        expect(body.candidates).toEqual({ status: "none", scripts: [] });
+        expect(body.hint).toBeNull();
+      }
+    }
+  });
+}
+
 test("buildSessionInfo and buildHookDefinitions honour the host context directly", () => {
   const now = Date.now();
   const rows = telemetry(now);

@@ -26,7 +26,7 @@ import { authorizeIngest, classifyPeer } from "./access";
 import { BoundedCache } from "./bounded-cache";
 import type { Store } from "./db";
 import { candidates as hookCandidates, findingLine, narrowingHint, patternKey, patternLabel, summarizePatterns, type HookPattern } from "./hook-drilldown";
-import { buildHookDefinitions, hookCallFromAttrs, splitHookItemName, type HookCall, type HookDefinition } from "./hooks";
+import { buildHookDefinitions, hookCallFromAttrs, matcherApplies, splitHookItemName, type HookCall, type HookDefinition } from "./hooks";
 import { createToken, hashToken, hostContext, LOCAL_HOST, LOCAL_HOST_ID, type HostContext, type HostCredentials } from "./hosts";
 import { ListenerError } from "./listener";
 import { gitRoot, type RepoInfo } from "./repos";
@@ -363,8 +363,10 @@ export function createHandler(opts: HandlerOptions): Handler {
     const info = row.sessionId ? sessionInfoFor(ctx, row.sessionId) : null;
     const registrations = row.sessionId ? store.eventsByNameForSessions("hook_registered", [row.sessionId], ctx.id) : [];
     const defs = buildHookDefinitions(name, registrations, (sessionId) => repoFor(ctx, sessionId)?.root ?? null, ctx);
-    const event = splitHookItemName(name).event;
-    const registered = registrations.filter((r) => r.attrs.hook_event === event).length;
+    const { event, matcherTarget } = splitHookItemName(name);
+    const registered = registrations.filter((r) =>
+      r.attrs.hook_event === event && matcherApplies(typeof r.attrs.hook_matcher === "string" ? r.attrs.hook_matcher : null, matcherTarget),
+    ).length;
     // Remote registration groups are not resolved scripts, even when their count matches a call.
     const found: ReturnType<typeof hookCandidates> = ctx.mayReadDisk
       ? hookCandidates(hookCallFromAttrs(row.attrs), defs, registered)
