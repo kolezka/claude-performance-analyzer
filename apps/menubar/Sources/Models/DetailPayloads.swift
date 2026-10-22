@@ -1,6 +1,6 @@
 import Foundation
 
-// Detail payloads (api/event, api/item, api/turns, api/turn).
+// Detail payloads (api/event, api/item, api/hook-call, api/turns, api/turn).
 
 struct EventDetail: Decodable {
     struct Detail: Decodable {
@@ -82,6 +82,9 @@ struct ItemDetail: Decodable {
         // Missing from older collectors, which only reported the session's repo name.
         let folder: String?
         let worktree: Bool?
+        // Hook calls only, and missing from older collectors.
+        let pattern: String?
+        let launcher: String?
     }
     struct Definition: Decodable {
         let source: String
@@ -96,6 +99,19 @@ struct ItemDetail: Decodable {
         // them. Remote definitions never carry a command or config path.
         let hookEvent: String?
         let hookSource: String?
+        // Nil when unset, unavailable remotely, or from an older collector.
+        let timeoutSec: Double?
+    }
+    struct Pattern: Decodable {
+        let key: String
+        let label: String
+        let count: Int
+        let errors: Int
+        let p95: Double
+    }
+    struct HiddenByHeadless: Decodable {
+        let calls: Int
+        let errors: Int
     }
 
     let kind: String
@@ -112,6 +128,33 @@ struct ItemDetail: Decodable {
     let recent: [Recent]
     let failed: [Recent]?
     let definitions: [Definition]?
+    // Hooks only, and missing from older collectors.
+    let patterns: [Pattern]?
+    let finding: String?
+    let hiddenByHeadless: HiddenByHeadless?
+    let slowest: [Recent]?
+}
+
+// /api/hook-call: one hook call, its session and the scripts that session registered.
+struct HookCallDetail: Decodable {
+    struct Session: Decodable {
+        let kindLabel: String?
+        let terminal: String?
+        let claudeVersion: String?
+        let launcher: String?
+        let sessionId: String?
+    }
+    struct Candidates: Decodable {
+        // "matched", "mismatch", "unresolved", "remote" or "none".
+        let status: String
+        let scripts: [ItemDetail.Definition]
+    }
+
+    let call: ItemDetail.Recent
+    let name: String
+    let session: Session
+    let candidates: Candidates
+    let hint: String?
 }
 
 // One row of /api/turns: a turn's timing and where it ran, without its spans.

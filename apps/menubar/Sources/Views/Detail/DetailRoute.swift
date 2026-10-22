@@ -1,10 +1,11 @@
 import Observation
 
 // Where the Details window is pointed: a single event, an aggregate row for one kind+name,
-// or one turn's waterfall.
+// one hook call, or one turn's waterfall.
 enum DetailRoute: Equatable {
     case event(id: Int)
     case item(kind: StatsKind, name: String)
+    case hookCall(id: Int)
     case turn(promptId: String)
 }
 

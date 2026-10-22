@@ -191,7 +191,7 @@ A separate disposable HTML-import probe confirmed a Bun HTML route returns 200 w
 
 Coverage checked against spec sections: hosts/tokens (Tasks 2 and 3), ingest/peer checks and listener lifecycle (Task 3), migrations/query scoping (Tasks 2 and 4), API/env (Tasks 1 and 3), no-disk enrichment (Task 4), menu bar (Task 6), dashboard (Task 5), tests/privacy docs/real exporter gate (Task 7). The five Review Focus conditions have owning tests above.
 
-## Verification status (2026-10-22)
+## Pre-merge verification (73684f1)
 
 Tasks 1 through 6 are implemented. Task 7's automated checks and local runtime checks passed; the manual checks listed below remain open, so the PR stays a draft.
 

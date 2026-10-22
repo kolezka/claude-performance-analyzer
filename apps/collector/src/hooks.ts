@@ -31,6 +31,8 @@ export interface HookDefinition {
   // Remote hosts only: the registration as telemetry carried it. Their config is not on this Mac.
   hookEvent?: string;
   hookSource?: Registration["hookSource"];
+  // Configured timeout in seconds; null when unset or unavailable for a remote host.
+  timeoutSec: number | null;
 }
 
 function num(v: unknown): number {
@@ -232,7 +234,8 @@ function definitionsFromEntries(
     for (const hook of hooks) {
       if (!hook || typeof hook !== "object" || Array.isArray(hook) || typeof hook.type !== "string") continue;
       const command = typeof hook.command === "string" ? hook.command : null;
-      out.push({ source, plugin, matcher, type: hook.type, command, summary: hookSummary(command ?? ""), sessions, configPath });
+      const timeoutSec = typeof hook.timeout === "number" && Number.isFinite(hook.timeout) && hook.timeout > 0 ? hook.timeout : null;
+      out.push({ source, plugin, matcher, type: hook.type, command, summary: hookSummary(command ?? ""), sessions, configPath, timeoutSec });
     }
   }
   return out;
@@ -283,6 +286,7 @@ export function buildHookDefinitions(
           summary: "Registered on remote host",
           sessions: g.sessionIds.size,
           configPath: null,
+          timeoutSec: null,
           hookEvent: event,
           hookSource: g.hookSource,
         }),

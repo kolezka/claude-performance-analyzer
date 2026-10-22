@@ -199,6 +199,15 @@ func itemJSON(_ name: String) -> [String: Any] {
      "headlessCount": 0, "repos": [], "recent": [], "failed": [], "definitions": []]
 }
 
+func hookCallJSON(_ name: String) -> [String: Any] {
+    ["name": name, "call": ["id": 7, "tsMs": 1, "ms": 5, "ok": true, "launcher": name],
+     "session": ["launcher": name], "candidates": ["status": "remote", "scripts": [
+        ["source": "user", "type": "telemetry", "command": NSNull(), "configPath": NSNull(),
+         "timeoutSec": NSNull(), "summary": "Registered on remote host", "sessions": 1,
+         "hookEvent": "Stop", "hookSource": "userSettings"],
+     ]], "hint": NSNull()]
+}
+
 // Answers every telemetry route for the given host with data tagged by `tag`.
 func telemetryReply(_ req: RecordedRequest, tag: String, base: String = "/") -> MockAction {
     switch req.path(base: base) {
@@ -208,6 +217,7 @@ func telemetryReply(_ req: RecordedRequest, tag: String, base: String = "/") -> 
     case "api/turns": .json(200, [turnSummaryJSON("p-\(tag)")])
     case "api/turn": .json(200, turnDetailJSON(req.query["prompt"]?.first ?? "?"))
     case "api/event": .json(200, eventJSON(tag))
+    case "api/hook-call": .json(200, hookCallJSON(tag))
     case "api/item": .json(200, itemJSON(tag))
     default: .status(404)
     }
@@ -497,10 +507,13 @@ struct TelemetryHostsTests {
             model.startPolling()
             model.panelOpen = true
             _ = try await model.fetchEvent(id: 7)
-            _ = try await model.fetchItem(kind: .tools, name: "a&b=c+d", excludeHeadless: true)
+            let hookCall = try await model.fetchHookCall(id: 7)
+            h.check(hookCall.name == "W" && hookCall.candidates.status == "remote", "hook call payload decoded")
+            h.check(hookCall.candidates.scripts.first?.hookEvent == "Stop" && hookCall.candidates.scripts.first?.timeoutSec == nil, "remote hook metadata decoded")
+            _ = try await model.fetchItem(kind: .tools, name: "a&b=c+d", excludeHeadless: true, pattern: "1/2:1&x=+ é")
             _ = try await model.fetchTurns(sort: .slowest, limit: 5, excludeHeadless: false)
             _ = try await model.fetchTurn(promptId: "p+1&q=2")
-            let routes = ["api/status", "api/summary", "api/live", "api/turns", "api/turn", "api/event", "api/item"]
+            let routes = ["api/status", "api/summary", "api/live", "api/turns", "api/turn", "api/event", "api/item", "api/hook-call"]
             try await waitUntil("all routes requested for the weird host") {
                 let seen = Set(MockServer.current.recorded.filter { $0.host == weird }.map { $0.path(base: base) })
                 return routes.allSatisfy(seen.contains)
@@ -513,6 +526,8 @@ struct TelemetryHostsTests {
             let item = all.last { $0.path(base: base) == "api/item" }
             h.check(item?.query["name"] == ["a&b=c+d"], "item name decoded as \(String(describing: item?.query["name"]))")
             h.check(item?.query["kind"] == ["tools"] && item?.query["excludeHeadless"] == ["1"], "item params")
+            h.check(item?.query["pattern"] == ["1/2:1&x=+ é"], "pattern filter must be encoded without losing host scope")
+            h.check(all.last { $0.path(base: base) == "api/hook-call" }?.query["id"] == ["7"], "hook call id")
             let turn = all.last { $0.path(base: base) == "api/turn" && $0.query["prompt"] == ["p+1&q=2"] }
             h.check(turn != nil, "turn prompt not decoded exactly")
             let event = all.last { $0.path(base: base) == "api/event" }
@@ -681,8 +696,9 @@ struct TelemetryHostsTests {
             // Manual detail loads are not part of the polling tasks, so nothing cancels them.
             let detachedEvent = Task { @MainActor in try await model.fetchEvent(id: 7) }
             let detachedTurn = Task { @MainActor in try await model.fetchTurn(promptId: "p-A") }
-            try await waitUntil("A's status, summary, event and turn are in flight") {
-                Set(MockServer.current.held.map { $0.path() }).isSuperset(of: ["api/status", "api/summary", "api/event", "api/turn"])
+            let detachedHook = Task { @MainActor in try await model.fetchHookCall(id: 7) }
+            try await waitUntil("A's status, summary, event, hook call and turn are in flight") {
+                Set(MockServer.current.held.map { $0.path() }).isSuperset(of: ["api/status", "api/summary", "api/event", "api/turn", "api/hook-call"])
             }
             model.selectedHostId = "B"
             h.check(model.selectionGeneration == generationA + 1, "generation bumped")
@@ -705,6 +721,12 @@ struct TelemetryHostsTests {
                 _ = try await detachedTurn.value
                 h.check(false, "late A turn was returned after switching to B")
             } catch {}
+            do {
+                _ = try await detachedHook.value
+                h.check(false, "late A hook call was returned after switching to B")
+            } catch {
+                h.check(Telemetry.isStale(error), "late hook call must fail as stale, got \(error)")
+            }
             try await Task.sleep(for: .milliseconds(300))
             h.check(model.status?.label == "B", "status reverted to \(String(describing: model.status?.label))")
             h.check(model.summary?.eventCount == 11, "summary reverted to \(String(describing: model.summary?.eventCount))")
@@ -727,8 +749,9 @@ struct TelemetryHostsTests {
             model.selectedHostId = "A"
             model.panelOpen = true
             let detached = Task { @MainActor in try await model.fetchItem(kind: .hooks, name: "x", excludeHeadless: false) }
+            let detachedHook = Task { @MainActor in try await model.fetchHookCall(id: 7) }
             try await waitUntil("A in flight") {
-                Set(MockServer.current.held.map { $0.path() }).isSuperset(of: ["api/status", "api/summary", "api/item"])
+                Set(MockServer.current.held.map { $0.path() }).isSuperset(of: ["api/status", "api/summary", "api/item", "api/hook-call"])
             }
             model.selectedHostId = "B"
             try await waitUntil("B data shown") { model.status?.label == "B" && model.turnDetail?.promptId == "p-B" }
@@ -738,6 +761,12 @@ struct TelemetryHostsTests {
                 h.check(false, "detached A item should not succeed")
             } catch {
                 h.check(Telemetry.isStale(error), "late A failure should report as stale, got \(error)")
+            }
+            do {
+                _ = try await detachedHook.value
+                h.check(false, "late A hook failure should report as stale")
+            } catch {
+                h.check(Telemetry.isStale(error), "late hook failure should report as stale, got \(error)")
             }
             try await Task.sleep(for: .milliseconds(300))
             h.check(model.status?.label == "B", "status cleared by A failure")

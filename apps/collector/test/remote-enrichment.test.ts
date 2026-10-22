@@ -74,6 +74,7 @@ function setup() {
   const get = async (path: string) => {
     const res = (await handler(new Request(`${ORIGIN}${path}`, { headers: { host: `127.0.0.1:${PORT}` } }), { requestIP: () => ({ address: "127.0.0.1" }), upgrade: () => false }))!;
     expect([path, res.status]).toEqual([path, 200]);
+    expect(res.headers.get("content-type")).toStartWith("application/json");
     return res.json() as Promise<any>;
   };
   return { store, host, get };
@@ -114,6 +115,14 @@ for (const order of ["remote first", "local first"] as const) {
         const id = store.events(0, host.id).find((e) => e.name === "tool_result")!.id!;
         spy.clear();
         await get(`/api/event?id=${id}&host=${host.id}`);
+        expect(spy.counts()).toEqual(zero);
+        const hookId = store.events(0, host.id).find((e) => e.name === "hook_execution_complete")!.id!;
+        spy.clear();
+        const hookCall = await get(`/api/hook-call?id=${hookId}&host=${host.id}`);
+        expect(hookCall.candidates.status).toBe("remote");
+        expect(hookCall.candidates.scripts).toHaveLength(3);
+        expect(hookCall.candidates.scripts.every((d: any) => d.command === null && d.configPath === null && d.timeoutSec === null)).toBe(true);
+        expect(hookCall.hint).toBeNull();
         expect(spy.counts()).toEqual(zero);
       };
       const local = async () => {
@@ -180,6 +189,7 @@ test("remote rows keep their transmitted paths, with no repo, worktree or config
     summary: "Registered on remote host",
     sessions: 1,
     configPath: null,
+    timeoutSec: null,
     hookEvent: "PreToolUse",
     hookSource,
   });

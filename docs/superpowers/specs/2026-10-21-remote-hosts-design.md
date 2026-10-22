@@ -96,7 +96,7 @@ The token is the real gate for remote ingest. The Tailscale address range is a s
 
 ### API
 
-- All existing read endpoints (`/api/summary`, `/api/status`, `/api/live`, `/api/turn`, `/api/turns`, `/api/event`, `/api/item`) accept `?host=<id>`, default `local`. An unknown host id returns `404`.
+- All telemetry read endpoints (`/api/summary`, `/api/status`, `/api/live`, `/api/turn`, `/api/turns`, `/api/event`, `/api/item`, `/api/hook-call`) accept `?host=<id>`, default `local`. An unknown host id returns `404`.
 - Live WebSocket messages carry `host`. Clients ignore messages for other hosts.
 - New, this-Mac-only (same `isOwnPage` checks as `/api/setup` for writes):
   - `GET /api/hosts`: list with `id`, `name`, `createdMs`, `lastSeenMs`, plus the local host first.
@@ -110,7 +110,7 @@ The token is the real gate for remote ingest. The Tailscale address range is a s
 For any host other than `local`, the collector must not read this Mac's disk:
 
 - no `gitRoot()` lookups; `repo` is null. `folder` shows the path the calls touched as sent, shortened only if the remote home can be inferred (otherwise unshortened). The builder may infer a display name from the last path segment, but must not claim it is a git repo.
-- no `buildHookDefinitions()` disk reads. Hook commands only exist in config files on disk, so remote hooks show what telemetry carries: event, matcher, source kind (`pluginHook`, `userSettings`, `projectSettings`) and plugin name from `hook_registered` events. No command and no config path (my call).
+- no `buildHookDefinitions()` disk reads. Hook commands only exist in config files on disk, so remote hooks show what telemetry carries: event, matcher, source kind (`pluginHook`, `userSettings`, `projectSettings`) and plugin name from `hook_registered` events. No command and no config path (my call). Hook-call drill-down labels these as remote registrations rather than matched scripts; `timeoutSec` stays null and no timeout-narrowing hint is inferred.
 - `extractPaths()` must not expand `~` with this Mac's `HOME` for remote rows.
 
 The cleanest way is to pass a "host context" (id, home or null, may-read-disk flag) into the functions that need it, rather than branching inside each one. The builder decides the exact shape.

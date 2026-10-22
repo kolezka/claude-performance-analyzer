@@ -46,6 +46,7 @@ struct DetailWindowView: View {
         case nil: "Details"
         case .event: "Event"
         case .item(let kind, let name): "\(kind.label): \(name)"
+        case .hookCall: "Hook call"
         case .turn: "Turn"
         }
     }
@@ -57,6 +58,8 @@ struct DetailWindowView: View {
             EventDetailView(model: model, id: id)
         case .item(let kind, let name):
             ItemDetailView(model: model, kind: kind, name: name, onPush: model.navigator.push)
+        case .hookCall(let id):
+            HookCallDetailView(model: model, id: id, onPush: model.navigator.push)
         case .turn(let promptId):
             TurnDetailView(model: model, promptId: promptId, onPush: model.navigator.push)
         }

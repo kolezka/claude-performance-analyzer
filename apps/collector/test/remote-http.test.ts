@@ -209,6 +209,7 @@ describe("peer gate", () => {
       ["GET", "/api/turns"],
       ["GET", `/api/event?id=${id}`],
       ["GET", "/api/item?kind=tools&name=Bash"],
+      ["GET", `/api/hook-call?id=${id}`],
       ["GET", "/api/setup"],
       ["POST", "/api/setup"],
       ["GET", "/api/hosts"],
@@ -365,12 +366,12 @@ describe("host management", () => {
   test("every read endpoint returns 404 for an unknown host before querying", async () => {
     const h = harness();
     const before = h.store.db.query("SELECT COUNT(*) AS n FROM events").get();
-    for (const path of ["/api/summary", "/api/status", "/api/live", "/api/turn", "/api/turns", "/api/event?id=1", "/api/item?kind=tools&name=Bash"]) {
+    for (const path of ["/api/summary", "/api/status", "/api/live", "/api/turn", "/api/turns", "/api/event?id=1", "/api/item?kind=tools&name=Bash", "/api/hook-call?id=1"]) {
       const sep = path.includes("?") ? "&" : "?";
       const res = (await h.call(`${path}${sep}host=nope`)).res!;
       expect([path, res.status]).toEqual([path, 404]);
       expect(await res.json()).toEqual({ error: "unknown host" });
-      if (!path.startsWith("/api/event")) expect((await h.call(`${path}${sep}host=local`)).res!.status).toBe(200);
+      if (!path.startsWith("/api/event") && !path.startsWith("/api/hook-call")) expect((await h.call(`${path}${sep}host=local`)).res!.status).toBe(200);
     }
     expect(h.store.db.query("SELECT COUNT(*) AS n FROM events").get()).toEqual(before);
   });

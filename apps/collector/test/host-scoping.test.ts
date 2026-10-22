@@ -22,7 +22,7 @@ const HOSTS = [
 function rowsFor(h: (typeof HOSTS)[number], now: number): { events: EventRow[]; spans: SpanRow[] } {
   const events: EventRow[] = [
     { tsMs: now - 9000, name: "hook_registered", sessionId: "S", promptId: null, attrs: { hook_event: "Stop", hook_source: "pluginHook", "plugin.name": h.plugin } },
-    { tsMs: now - 8000, name: "user_prompt", sessionId: "S", promptId: "P", attrs: { prompt_length: h.n } },
+    { tsMs: now - 8000, name: "user_prompt", sessionId: "S", promptId: "P", attrs: { prompt_length: h.n, launcher: `launcher-${h.key}` } },
   ];
   for (let i = 0; i < h.n; i++) {
     events.push({
@@ -67,7 +67,7 @@ function setup() {
   return { store, ids, call, get };
 }
 
-const sentinels = (h: (typeof HOSTS)[number]) => [String(h.tool), String(h.hook), h.model, h.plugin, h.agent];
+const sentinels = (h: (typeof HOSTS)[number]) => [String(h.tool), String(h.hook), h.model, h.plugin, h.agent, `launcher-${h.key}`];
 
 function expectOnly(hostKey: string, body: unknown, endpoint: string, needed: (h: (typeof HOSTS)[number]) => string[]) {
   const text = JSON.stringify(body);
@@ -79,7 +79,7 @@ function expectOnly(hostKey: string, body: unknown, endpoint: string, needed: (h
 }
 
 for (const order of [["local", "h1", "h2"], ["h2", "h1", "local"]] as const) {
-  test(`all seven reads stay inside the selected host (${order.join(" → ")})`, async () => {
+  test(`all telemetry reads stay inside the selected host (${order.join(" → ")})`, async () => {
     const { store, ids, call, get } = setup();
     for (const key of order) {
       const h = HOSTS.find((x) => x.key === key)!;
@@ -116,6 +116,29 @@ for (const order of [["local", "h1", "h2"], ["h2", "h1", "local"]] as const) {
       const hooks = await get("/api/item?kind=hooks&name=Stop", key);
       expect(hooks.count).toBe(1);
       expectOnly(key, hooks, "item hooks", (x) => (x.key === "local" ? [String(x.hook)] : [String(x.hook), x.plugin]));
+      expect(hooks.patterns).toEqual([expect.objectContaining({ key: "1/1:0:0:0", count: 1, p95: h.hook })]);
+      expect(hooks.slowest[0].launcher).toBe(`launcher-${key}`);
+      const filtered = await get("/api/item?kind=hooks&name=Stop&pattern=1%2F1%3A0%3A0%3A0", key);
+      expect(filtered.count).toBe(1);
+      const absentPattern = await get("/api/item?kind=hooks&name=Stop&pattern=0%2F1%3A1%3A0%3A0", key);
+      expect(absentPattern.count).toBe(0);
+      expect(absentPattern.patterns).toHaveLength(1);
+      if (key !== "local") expect(absentPattern.definitions[0].plugin).toBe(h.plugin);
+
+      const hookId = store.events(0, ids[key]).find((e) => e.name === "hook_execution_complete")!.id!;
+      const hookCall = await get(`/api/hook-call?id=${hookId}`, key);
+      expect(hookCall.call).toMatchObject({ ms: h.hook, pattern: "1/1 OK", launcher: `launcher-${key}` });
+      expect(hookCall.session.launcher).toBe(`launcher-${key}`);
+      expectOnly(key, hookCall, "hook call", (x) => [String(x.hook), `launcher-${x.key}`]);
+      if (key !== "local") {
+        expect(hookCall.candidates.status).toBe("remote");
+        expect(hookCall.candidates.scripts).toEqual([expect.objectContaining({ plugin: h.plugin, command: null, configPath: null, timeoutSec: null })]);
+        expect(hookCall.hint).toBeNull();
+      }
+      for (const other of HOSTS.filter((x) => x.key !== key)) {
+        const foreignHook = store.events(0, ids[other.key]).find((e) => e.name === "hook_execution_complete")!.id!;
+        expect((await call(`/api/hook-call?id=${foreignHook}&host=${ids[key]}`)).status).toBe(404);
+      }
 
       const own = store.events(0, ids[key]).find((e) => e.name === "tool_result")!.id!;
       const event = await get(`/api/event?id=${own}`, key);
@@ -132,7 +155,7 @@ for (const order of [["local", "h1", "h2"], ["h2", "h1", "local"]] as const) {
 
 test("an unknown host is 404 on every read endpoint", async () => {
   const { call } = setup();
-  for (const path of ["/api/summary", "/api/status", "/api/live", "/api/turn", "/api/turns", "/api/event?id=1", "/api/item?kind=tools&name=Bash"]) {
+  for (const path of ["/api/summary", "/api/status", "/api/live", "/api/turn", "/api/turns", "/api/event?id=1", "/api/item?kind=tools&name=Bash", "/api/hook-call?id=1"]) {
     const res = await call(`${path}${path.includes("?") ? "&" : "?"}host=missing`);
     expect([path, res.status]).toEqual([path, 404]);
   }

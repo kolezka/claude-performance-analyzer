@@ -25,7 +25,8 @@ import { applyEnv, planEnv, settingsPath, telemetryEnv } from "@cpa/claude-setti
 import { authorizeIngest, classifyPeer } from "./access";
 import { BoundedCache } from "./bounded-cache";
 import type { Store } from "./db";
-import { buildHookDefinitions, hookCallFromAttrs, type HookCall, type HookDefinition } from "./hooks";
+import { candidates as hookCandidates, findingLine, narrowingHint, patternKey, patternLabel, summarizePatterns, type HookPattern } from "./hook-drilldown";
+import { buildHookDefinitions, hookCallFromAttrs, splitHookItemName, type HookCall, type HookDefinition } from "./hooks";
 import { createToken, hashToken, hostContext, LOCAL_HOST, LOCAL_HOST_ID, type HostContext, type HostCredentials } from "./hosts";
 import { ListenerError } from "./listener";
 import { gitRoot, type RepoInfo } from "./repos";
@@ -115,6 +116,8 @@ interface Recent {
   sessionLabel: string | null;
   branch: string | null;
   hooks: HookCall | null;
+  pattern: string | null;
+  launcher: string | null;
   folder: string | null;
   worktree: boolean;
 }
@@ -226,6 +229,7 @@ export function createHandler(opts: HandlerOptions): Handler {
     // timestamp, not the session's all-time dominant one a long session can have since moved on
     // from (e.g. a hook call logged after the session's work already shifted to another repo).
     const place = placeAsOf(ctx, info, e.tsMs, e.promptId, ctx.mayReadDisk ? null : (extractPaths(e.attrs, ctx.home)[0] ?? null));
+    const hooks = kind === "hooks" ? hookCallFromAttrs(e.attrs) : null;
     return {
       id: e.id as number,
       tsMs: e.tsMs,
@@ -238,7 +242,9 @@ export function createHandler(opts: HandlerOptions): Handler {
       sessionKind: info?.kind ?? null,
       sessionLabel: info?.kindLabel ?? null,
       branch: info ? branchAsOf(info, e.tsMs, e.promptId) : null,
-      hooks: kind === "hooks" ? hookCallFromAttrs(e.attrs) : null,
+      hooks,
+      pattern: hooks ? patternLabel(hooks) : null,
+      launcher: info?.launcher ?? null,
       folder: place.folder,
       worktree: place.worktree,
     };
@@ -259,7 +265,29 @@ export function createHandler(opts: HandlerOptions): Handler {
     const allRows = candidates.filter((e) => itemKey(kind, e.attrs) === name);
 
     const headlessCount = allRows.filter((e) => sessionKindFor(ctx, e.sessionId) === "headless").length;
-    const rows = excludeHeadless ? allRows.filter((e) => sessionKindFor(ctx, e.sessionId) !== "headless") : allRows;
+    const visibleRows = excludeHeadless ? allRows.filter((e) => sessionKindFor(ctx, e.sessionId) !== "headless") : allRows;
+
+    // Patterns describe the visible host's whole group, even when a pattern narrows the call lists.
+    const isHooks = kind === "hooks";
+    let hookExtras: { patterns: HookPattern[]; finding: string | null; hiddenByHeadless: { calls: number; errors: number } | null } | null = null;
+    if (isHooks) {
+      const patterns = summarizePatterns(visibleRows.map((e) => ({ call: hookCallFromAttrs(e.attrs), ms: itemDurationMs(kind, e.attrs) })));
+      const finding = findingLine(
+        visibleRows.map((e) => ({
+          call: hookCallFromAttrs(e.attrs),
+          headless: sessionKindFor(ctx, e.sessionId) === "headless",
+          launcher: e.sessionId ? (sessionInfoFor(ctx, e.sessionId)?.launcher ?? null) : null,
+        })),
+      );
+      let hiddenByHeadless: { calls: number; errors: number } | null = null;
+      if (excludeHeadless) {
+        const hidden = allRows.filter((e) => sessionKindFor(ctx, e.sessionId) === "headless");
+        hiddenByHeadless = { calls: hidden.length, errors: hidden.filter((e) => itemFailed(kind, e.attrs)).length };
+      }
+      hookExtras = { patterns, finding, hiddenByHeadless };
+    }
+    const pattern = isHooks ? url.searchParams.get("pattern") : null;
+    const rows = pattern ? visibleRows.filter((e) => patternKey(hookCallFromAttrs(e.attrs)) === pattern) : visibleRows;
 
     const durations = rows.map((e) => itemDurationMs(kind, e.attrs)).sort((a, b) => a - b);
     const failures = rows.filter((e) => itemFailed(kind, e.attrs)).length;
@@ -288,14 +316,20 @@ export function createHandler(opts: HandlerOptions): Handler {
     const recent = sortedRecent.slice(0, 10).map((e) => toRecent(ctx, kind, e));
     const failed = sortedRecent
       .filter((e) => itemFailed(kind, e.attrs))
-      .slice(0, 10)
+      .slice(0, isHooks ? 15 : 10)
       .map((e) => toRecent(ctx, kind, e));
+    const slowest = isHooks
+      ? [...rows]
+          .sort((a, b) => itemDurationMs(kind, b.attrs) - itemDurationMs(kind, a.attrs))
+          .slice(0, 15)
+          .map((e) => toRecent(ctx, kind, e))
+      : null;
 
     const definitions: HookDefinition[] =
       kind === "hooks"
         ? buildHookDefinitions(
             name,
-            store.eventsByNameForSessions("hook_registered", [...new Set(rows.map((e) => e.sessionId).filter((s): s is string => s !== null))], ctx.id),
+            store.eventsByNameForSessions("hook_registered", [...new Set(visibleRows.map((e) => e.sessionId).filter((s): s is string => s !== null))], ctx.id),
             (sessionId) => repoFor(ctx, sessionId)?.root ?? null,
             ctx,
           )
@@ -315,6 +349,40 @@ export function createHandler(opts: HandlerOptions): Handler {
       recent,
       failed,
       definitions,
+      ...(hookExtras ? { ...hookExtras, slowest } : {}),
+    });
+  }
+
+  function hookCallDetail(ctx: HostContext, url: URL) {
+    const id = Number(url.searchParams.get("id"));
+    if (!Number.isFinite(id)) return notFound();
+    const row = store.event(id, ctx.id);
+    if (!row || row.name !== "hook_execution_complete") return notFound();
+
+    const name = itemKey("hooks", row.attrs);
+    const info = row.sessionId ? sessionInfoFor(ctx, row.sessionId) : null;
+    const registrations = row.sessionId ? store.eventsByNameForSessions("hook_registered", [row.sessionId], ctx.id) : [];
+    const defs = buildHookDefinitions(name, registrations, (sessionId) => repoFor(ctx, sessionId)?.root ?? null, ctx);
+    const event = splitHookItemName(name).event;
+    const registered = registrations.filter((r) => r.attrs.hook_event === event).length;
+    // Remote registration groups are not resolved scripts, even when their count matches a call.
+    const found: ReturnType<typeof hookCandidates> = ctx.mayReadDisk
+      ? hookCandidates(hookCallFromAttrs(row.attrs), defs, registered)
+      : { status: registered > 0 ? "remote" : "none", scripts: defs };
+    const call = toRecent(ctx, "hooks", row);
+
+    return Response.json({
+      call,
+      name,
+      session: {
+        kindLabel: info?.kindLabel ?? null,
+        terminal: info?.terminal ?? null,
+        claudeVersion: info?.claudeVersion ?? null,
+        launcher: info?.launcher ?? null,
+        sessionId: row.sessionId,
+      },
+      candidates: found,
+      hint: ctx.mayReadDisk ? narrowingHint(call.ms, found.status, found.scripts) : null,
     });
   }
 
@@ -396,6 +464,7 @@ export function createHandler(opts: HandlerOptions): Handler {
     "/api/turns": turnsList,
     "/api/event": eventDetail,
     "/api/item": itemDetail,
+    "/api/hook-call": hookCallDetail,
   };
 
   // The selected host, resolved before any telemetry query. Unknown ids never reach SQL.

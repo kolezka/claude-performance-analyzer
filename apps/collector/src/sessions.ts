@@ -34,6 +34,8 @@ export interface SessionInfo {
   branch: string | null;
   terminal: string | null;
   claudeVersion: string | null;
+  // Who started the session, from a `launcher` resource attr (OTEL_RESOURCE_ATTRIBUTES).
+  launcher: string | null;
   models: string[];
   firstMs: number;
   lastMs: number;
@@ -121,6 +123,7 @@ export function buildSessionInfo(sessionId: string, events: EventRow[], context:
   let branchMs = -Infinity;
   let terminal: string | null = null;
   let claudeVersion: string | null = null;
+  let launcher: string | null = null;
   const models = new Set<string>();
   let firstMs = Infinity;
   let lastMs = -Infinity;
@@ -140,6 +143,7 @@ export function buildSessionInfo(sessionId: string, events: EventRow[], context:
     const a = e.attrs;
     if (!terminal && typeof a["terminal.type"] === "string") terminal = a["terminal.type"];
     if (!claudeVersion && typeof a["service.version"] === "string") claudeVersion = a["service.version"];
+    if (!launcher && typeof a.launcher === "string" && a.launcher !== "") launcher = a.launcher;
     if (a["terminal.type"] === "non-interactive") sawNonInteractiveTerminal = true;
 
     const headBranch = a["vcs.ref.head.name"];
@@ -212,6 +216,7 @@ export function buildSessionInfo(sessionId: string, events: EventRow[], context:
     branch,
     terminal,
     claudeVersion,
+    launcher,
     models: modelsArr,
     firstMs,
     lastMs,

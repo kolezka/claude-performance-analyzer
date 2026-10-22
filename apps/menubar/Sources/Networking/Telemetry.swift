@@ -495,13 +495,19 @@ final class Telemetry {
         try await get("api/event", [URLQueryItem(name: "id", value: String(id))], context: currentContext)
     }
 
-    func fetchItem(kind: StatsKind, name: String, excludeHeadless: Bool) async throws -> ItemDetail {
-        try await get("api/item", [
+    func fetchHookCall(id: Int) async throws -> HookCallDetail {
+        try await get("api/hook-call", [URLQueryItem(name: "id", value: String(id))], context: currentContext)
+    }
+
+    func fetchItem(kind: StatsKind, name: String, excludeHeadless: Bool, pattern: String? = nil) async throws -> ItemDetail {
+        var query = [
             URLQueryItem(name: "kind", value: kind.rawValue),
             URLQueryItem(name: "name", value: name),
             URLQueryItem(name: "minutes", value: String(minutes)),
             URLQueryItem(name: "excludeHeadless", value: excludeHeadless ? "1" : "0"),
-        ], context: currentContext)
+        ]
+        if let pattern { query.append(URLQueryItem(name: "pattern", value: pattern)) }
+        return try await get("api/item", query, context: currentContext)
     }
 
     func fetchTurns(sort: TurnsSort, limit: Int, excludeHeadless: Bool) async throws -> [TurnSummary] {
