@@ -3,8 +3,9 @@
   import type { LiveEvent } from "@cpa/analytics";
   import { fmtMs } from "@cpa/analytics";
   import { clockSec } from "./format";
+  import { RequestGate, RunningHooks, apiUrl, liveForHost } from "./hosts";
 
-  let { onData }: { onData: () => void } = $props();
+  let { hostId, onData }: { hostId: string; onData: () => void } = $props();
 
   const FEED_MAX = 40;
   const STALE_HOOK_MS = 120_000;
@@ -23,27 +24,37 @@
   let runningList = $state<[string, number][]>([]);
   let nowTick = $state(Date.now());
   let lastSeen = 0;
-  // Hooks that started but have not completed yet, keyed by session and hook name.
-  const inFlight = new Map<string, number>();
+  let socketOpen = false;
+  const running = new RunningHooks(STALE_HOOK_MS);
+  const gate = new RequestGate();
 
   let visibleRows = $derived(feed.filter((e) => e.kind !== "hook_start"));
   let maxMs = $derived(Math.max(...visibleRows.map((e) => e.ms ?? 0), 1000));
 
-  function track(events: LiveEvent[]) {
-    for (const e of events) {
-      const key = `${e.sessionId}|${e.label}`;
-      if (e.kind === "hook_start") inFlight.set(key, e.tsMs);
-      else if (e.kind === "hook") inFlight.delete(key);
-    }
+  async function backlog() {
+    await gate.run<LiveEvent[]>(fetch, apiUrl("/api/live", hostId), {
+      ok: (events) => {
+        feed = events.map((e) => wrap(e, false));
+        lastSeen = events[0]?.tsMs ?? 0;
+      },
+    });
   }
 
-  async function backlog() {
-    try {
-      const events = (await (await fetch("/api/live")).json()) as LiveEvent[];
-      feed = events.map((e) => wrap(e, false));
-      lastSeen = events[0]?.tsMs ?? 0;
-    } catch {}
+  // A host switch drops everything from the old host, including in-flight backlog requests.
+  function resetForHost() {
+    gate.invalidate();
+    feed = [];
+    lastSeen = 0;
+    agoText = "";
+    running.clear();
+    runningList = [];
+    if (socketOpen) backlog();
   }
+
+  $effect(() => {
+    hostId;
+    resetForHost();
+  });
 
   $effect(() => {
     let retryMs = 1000;
@@ -56,13 +67,14 @@
       ws.onopen = () => {
         retryMs = 1000;
         connState = "Live";
+        socketOpen = true;
         backlog();
       };
       ws.onmessage = (msg) => {
-        const data = JSON.parse(msg.data) as { type: string; events: LiveEvent[]; changed: number };
-        if (data.type !== "events") return;
+        const data = liveForHost(String(msg.data), hostId);
+        if (!data) return;
         const fresh = [...data.events].sort((a, b) => b.tsMs - a.tsMs);
-        track(data.events);
+        running.track(data.events);
         if (fresh.length) {
           lastSeen = Math.max(lastSeen, fresh[0]!.tsMs);
           feed = [...fresh.map((e) => wrap(e, true)), ...feed.map((r) => (r.fresh ? { ...r, fresh: false } : r))].slice(0, FEED_MAX);
@@ -70,6 +82,7 @@
         if (data.changed) onData();
       };
       ws.onclose = () => {
+        socketOpen = false;
         if (closed) return;
         connState = "Reconnecting";
         reconnectTimer = setTimeout(connect, retryMs);
@@ -79,6 +92,7 @@
     connect();
     return () => {
       closed = true;
+      gate.invalidate();
       if (reconnectTimer) clearTimeout(reconnectTimer);
       ws?.close();
     };
@@ -88,8 +102,7 @@
     const id = setInterval(() => {
       const now = Date.now();
       agoText = lastSeen ? `last event ${fmtMs(Math.max(0, now - lastSeen))} ago` : "";
-      for (const [k, t] of inFlight) if (now - t > STALE_HOOK_MS) inFlight.delete(k);
-      runningList = [...inFlight];
+      runningList = running.entries(now);
       nowTick = now;
     }, 250);
     return () => clearInterval(id);

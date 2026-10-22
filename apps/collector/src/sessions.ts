@@ -1,6 +1,7 @@
 // Builds session metadata from its events: inferred repo, branch, terminal, cost.
 import { extractPaths } from "@cpa/analytics";
 import type { Attrs, EventRow } from "@cpa/otlp";
+import type { HostContext } from "./hosts";
 import { gitRoot, type RepoInfo } from "./repos";
 
 // The only event types buildSessionInfo reads. Resource attrs (terminal, version, branch) are
@@ -11,6 +12,12 @@ export interface RepoSample {
   tsMs: number;
   promptId: string | null;
   repo: RepoInfo;
+}
+
+export interface PathSample {
+  tsMs: number;
+  promptId: string | null;
+  path: string;
 }
 
 export interface BranchSample {
@@ -39,6 +46,9 @@ export interface SessionInfo {
   // one (a long session can move between repos and branches over its life).
   repoTimeline: RepoSample[];
   branchTimeline: BranchSample[];
+  // Every path tool calls touched, as sent. A remote host has no repo lookup, so this is what
+  // its folder column shows.
+  pathTimeline: PathSample[];
 }
 
 function lastAtOrBefore<T extends { tsMs: number }>(samples: T[], tsMs: number): T | null {
@@ -74,6 +84,10 @@ export function repoAsOf(info: SessionInfo, tsMs: number, promptId: string | nul
   return sampleAsOf(info.repoTimeline, tsMs, promptId)?.repo ?? info.repo;
 }
 
+export function pathAsOf(info: SessionInfo, tsMs: number, promptId: string | null): string | null {
+  return sampleAsOf(info.pathTimeline, tsMs, promptId)?.path ?? null;
+}
+
 export function branchAsOf(info: SessionInfo, tsMs: number, promptId: string | null): string | null {
   return sampleAsOf(info.branchTimeline, tsMs, promptId)?.branch ?? info.branch;
 }
@@ -97,7 +111,9 @@ function gitBranchFromToolParams(attrs: Attrs): string | null {
 }
 
 // Repo = the git root most of the session's tool calls touched (ties broken by recency).
-export function buildSessionInfo(sessionId: string, events: EventRow[], home: string): SessionInfo | null {
+// A context that may not read disk (a remote host) never resolves a repo: this Mac's files say
+// nothing about another machine's paths.
+export function buildSessionInfo(sessionId: string, events: EventRow[], context: HostContext): SessionInfo | null {
   if (!events.length) return null;
 
   const rootHits = new Map<string, { repo: RepoInfo; count: number; lastMs: number }>();
@@ -116,6 +132,7 @@ export function buildSessionInfo(sessionId: string, events: EventRow[], home: st
   // for free just by pushing in loop order.
   const repoTimeline: RepoSample[] = [];
   const branchTimeline: BranchSample[] = [];
+  const pathTimeline: PathSample[] = [];
 
   for (const e of events) {
     firstMs = Math.min(firstMs, e.tsMs);
@@ -154,7 +171,9 @@ export function buildSessionInfo(sessionId: string, events: EventRow[], home: st
       // The first path that resolves to a repo wins the sample, same rule repoForEvent uses
       // for a single call; every resolved path still counts toward the all-time dominant vote.
       let sampleRepo: RepoInfo | null = null;
-      for (const p of extractPaths(a, home)) {
+      for (const p of extractPaths(a, context.home)) {
+        pathTimeline.push({ tsMs: e.tsMs, promptId: e.promptId, path: p });
+        if (!context.mayReadDisk) continue;
         const repo = gitRoot(p);
         if (!repo) continue;
         if (!sampleRepo) sampleRepo = repo;
@@ -202,5 +221,6 @@ export function buildSessionInfo(sessionId: string, events: EventRow[], home: st
     kindLabel,
     repoTimeline,
     branchTimeline,
+    pathTimeline,
   };
 }

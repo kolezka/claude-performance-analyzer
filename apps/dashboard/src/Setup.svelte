@@ -39,7 +39,7 @@
 
 <section id="setup" class="card" hidden={!visible}>
   {#if plan}
-    <h2>Send Claude Code telemetry here</h2>
+    <h2>Send Claude Code telemetry from this Mac here</h2>
     {#if plan.error}
       <p class="bad">Cannot update settings: {plan.error}</p>
     {:else if plan.missing.length}

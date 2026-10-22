@@ -25,7 +25,8 @@ test("endpoint rejects posts that do not come from the dashboard", async () => {
 });
 
 test("endpoint applies settings for the dashboard origin", async () => {
-  const res = await fetch(`${collector.url}/api/setup`, {
+  // A remote host selection in the client never redirects setup away from this Mac.
+  const res = await fetch(`${collector.url}/api/setup?host=some-remote`, {
     method: "POST",
     headers: { origin: collector.url, "content-type": "application/json" },
     body: "{}",
@@ -35,5 +36,7 @@ test("endpoint applies settings for the dashboard origin", async () => {
   expect(out.added).toContain("CLAUDE_CODE_ENABLE_TELEMETRY");
   expect(JSON.stringify(out)).not.toContain("sk-secret");
   expect(existsSync(out.backup)).toBe(true);
-  expect(JSON.parse(readFileSync(path, "utf8")).env.OTEL_EXPORTER_OTLP_ENDPOINT).toBe(collector.url);
+  const env = JSON.parse(readFileSync(path, "utf8")).env;
+  expect(env.OTEL_EXPORTER_OTLP_ENDPOINT).toBe(collector.url);
+  expect(env.OTEL_EXPORTER_OTLP_HEADERS).toBeUndefined();
 });

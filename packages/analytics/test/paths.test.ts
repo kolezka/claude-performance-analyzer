@@ -53,3 +53,16 @@ test("extractPaths stops a bare path at trailing shell punctuation", () => {
   expect(extractPaths({ tool_parameters: JSON.stringify({ full_command: "cd /abs/and&&ls" }) }, HOME)).toEqual(["/abs/and"]);
   expect(extractPaths({ tool_input: JSON.stringify({ command: "git -C /abs/gitc)status" }) }, HOME)).toEqual(["/abs/gitc"]);
 });
+
+test("extractPaths with a null home keeps ~ paths as sent and never expands them", () => {
+  const tilde = { tool_input: JSON.stringify({ file_path: "~/proj/file.ts" }) };
+  expect(extractPaths(tilde, null)).toEqual(["~/proj/file.ts"]);
+  expect(extractPaths({ tool_input: JSON.stringify({ path: "~" }) }, null)).toEqual(["~"]);
+  const cmd = { tool_parameters: JSON.stringify({ full_command: "cd ~/work && git -C /abs/repo status" }) };
+  expect(extractPaths(cmd, null)).toEqual(["~/work", "/abs/repo"]);
+  expect(extractPaths({ tool_input: JSON.stringify({ file_path: "/abs/file.ts" }) }, null)).toEqual(["/abs/file.ts"]);
+  expect(extractPaths({ tool_input: JSON.stringify({ file_path: "relative/file.ts", command: "cd ~other/x" }) }, null)).toEqual([]);
+  // A string home behaves exactly as before.
+  expect(extractPaths(tilde, HOME)).toEqual(["/Users/joe/proj/file.ts"]);
+  expect(extractPaths({ tool_input: JSON.stringify({ path: "~" }) }, HOME)).toEqual(["/Users/joe"]);
+});

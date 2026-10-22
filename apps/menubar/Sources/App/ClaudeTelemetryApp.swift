@@ -19,7 +19,7 @@ struct ClaudeTelemetryApp: App {
         MenuBarExtra {
             PanelView(model: model)
         } label: {
-            MenuBarLabel(status: model.status)
+            MenuBarLabel(status: model.status, hostName: model.isRemoteSelected ? model.selectedHostName : nil)
         }
         .menuBarExtraStyle(.window)
 

@@ -133,7 +133,7 @@ struct TurnSection: View {
     private func subtitle(folder: String?, sessionLabel: String?, repo: String?) -> some View {
         Group {
             if let folder {
-                Text(abbreviateHome(folder)).monospaced()
+                Text(displayPath(folder, hostId: model.selectedHostId)).monospaced()
             } else {
                 Text(sessionLabel ?? repo ?? "Unknown session")
             }

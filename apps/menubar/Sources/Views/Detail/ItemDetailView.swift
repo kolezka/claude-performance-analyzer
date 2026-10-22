@@ -34,7 +34,7 @@ struct ItemDetailView: View {
             }
             refreshBar
         }
-        .task(id: "\(kind.rawValue)/\(name)/\(model.minutes)/\(hideHeadlessSessions)") { await load() }
+        .task(id: "\(model.selectionGeneration)/\(kind.rawValue)/\(name)/\(model.minutes)/\(hideHeadlessSessions)") { await load() }
     }
 
     private var header: some View {
@@ -181,11 +181,21 @@ struct ItemDetailView: View {
                         }
                         .padding(6)
                         .background(.quaternary.opacity(0.3), in: RoundedRectangle(cornerRadius: 5))
+                    } else if def.hookEvent != nil || def.hookSource != nil {
+                        // A remote host's hooks only exist in its own config files, which this Mac
+                        // never reads, so show what telemetry carried and nothing more.
+                        Text(["Registered as", def.hookEvent, def.hookSource.map { "from \($0)" }].compactMap { $0 }.joined(separator: " "))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .textSelection(.enabled)
+                        Text("Command and config file are not reported for remote hosts.")
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
                     } else {
                         Text("No command recorded.").font(.caption).foregroundStyle(.secondary)
                     }
                     if let configPath = def.configPath {
-                        Text(abbreviateHome(configPath))
+                        Text(displayPath(configPath, hostId: model.selectedHostId))
                             .font(.caption2)
                             .foregroundStyle(.tertiary)
                             .textSelection(.enabled)
@@ -233,7 +243,7 @@ struct ItemDetailView: View {
                         if !call.ok {
                             Image(systemName: "xmark.octagon").foregroundStyle(.red)
                         }
-                        Text(call.folder.map(abbreviateHome) ?? "folder unknown")
+                        Text(call.folder.map { displayPath($0, hostId: model.selectedHostId) } ?? "folder unknown")
                             .monospaced()
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
@@ -277,16 +287,18 @@ struct ItemDetailView: View {
         }
     }
 
+    // Also runs from Refresh, outside .task, so it checks the generation itself.
     private func load() async {
+        let generation = model.selectionGeneration
         isLoading = true
         defer { isLoading = false }
         do {
             let d = try await model.fetchItem(kind: kind, name: name, excludeHeadless: hideHeadlessSessions)
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled, generation == model.selectionGeneration else { return }
             detail = d
             loadError = nil
         } catch {
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled, !Telemetry.isStale(error), generation == model.selectionGeneration else { return }
             loadError = error.localizedDescription
         }
     }

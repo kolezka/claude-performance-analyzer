@@ -22,6 +22,7 @@ function sessionInfo(overrides: Partial<SessionInfo> = {}): SessionInfo {
     kindLabel: "Interactive",
     repoTimeline: [],
     branchTimeline: [],
+    pathTimeline: [],
     ...overrides,
   };
 }

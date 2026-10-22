@@ -121,7 +121,9 @@ function tryParseJson(v: unknown): Attrs | null {
   }
 }
 
-function expandHome(path: string, home: string): string {
+// A null home (a remote host) keeps "~" paths exactly as sent.
+function expandHome(path: string, home: string | null): string {
+  if (home === null) return path;
   if (path === "~") return home;
   if (path.startsWith("~/")) return home + path.slice(1);
   return path;
@@ -142,12 +144,12 @@ const COMMAND_KEYS = ["full_command", "command"] as const;
 
 // Absolute paths a tool call touched: file/notebook/path fields, plus `cd` and `git -C` targets
 // inside command strings. Used to infer which repo a session worked in.
-export function extractPaths(attrs: Attrs, home: string): string[] {
+export function extractPaths(attrs: Attrs, home: string | null): string[] {
   const out = new Set<string>();
   const add = (raw: string | undefined) => {
     if (!raw) return;
     const p = expandHome(raw, home);
-    if (p.startsWith("/")) out.add(p);
+    if (p.startsWith("/") || (home === null && (p === "~" || p.startsWith("~/")))) out.add(p);
   };
 
   for (const field of ["tool_input", "tool_parameters"] as const) {

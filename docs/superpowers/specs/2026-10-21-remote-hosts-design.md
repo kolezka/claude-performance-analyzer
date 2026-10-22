@@ -1,6 +1,8 @@
 # Remote hosts: design
 
-Date: 2026-10-21. Status: draft, waiting for approval.
+Date: 2026-10-21. Status: implementation authorized on 2026-10-22.
+
+Implementation plan: [Remote hosts](../plans/2026-10-22-remote-hosts.md).
 
 ## Intent
 

@@ -92,6 +92,10 @@ struct ItemDetail: Decodable {
         let summary: String
         let sessions: Int
         let configPath: String?
+        // Sent for remote hosts only: the registered hook event and source as telemetry reported
+        // them. Remote definitions never carry a command or config path.
+        let hookEvent: String?
+        let hookSource: String?
     }
 
     let kind: String

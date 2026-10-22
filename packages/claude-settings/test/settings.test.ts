@@ -101,3 +101,34 @@ test("claudeDir honors CC_CLAUDE_DIR, then CLAUDE_CONFIG_DIR, then falls back to
     else process.env.CLAUDE_CONFIG_DIR = prevConfigDir;
   }
 });
+
+const localBlock = {
+  CLAUDE_CODE_ENABLE_TELEMETRY: "1",
+  OTEL_LOGS_EXPORTER: "otlp",
+  OTEL_METRICS_EXPORTER: "otlp",
+  OTEL_EXPORTER_OTLP_PROTOCOL: "http/json",
+  OTEL_EXPORTER_OTLP_ENDPOINT: "http://127.0.0.1:4318",
+  OTEL_LOGS_EXPORT_INTERVAL: "1000",
+  OTEL_LOG_TOOL_DETAILS: "1",
+  CLAUDE_CODE_ENHANCED_TELEMETRY_BETA: "1",
+  OTEL_TRACES_EXPORTER: "otlp",
+};
+
+test("telemetryEnv with a numeric port keeps the existing local block, with no header", () => {
+  const env = telemetryEnv(4318);
+  expect(env.OTEL_EXPORTER_OTLP_ENDPOINT).toBe("http://127.0.0.1:4318");
+  expect(env).toEqual(localBlock);
+  expect("OTEL_EXPORTER_OTLP_HEADERS" in env).toBe(false);
+});
+
+test("telemetryEnv with a string endpoint keeps it verbatim and adds the exact header", () => {
+  const remote = telemetryEnv("http://100.101.102.103:4318", "Authorization=Bearer cpa_abc");
+  expect(remote).toEqual({
+    ...localBlock,
+    OTEL_EXPORTER_OTLP_ENDPOINT: "http://100.101.102.103:4318",
+    OTEL_EXPORTER_OTLP_HEADERS: "Authorization=Bearer cpa_abc",
+  });
+  const placeholder = telemetryEnv("http://<THIS_MAC_TAILSCALE_IP>:4318");
+  expect(placeholder.OTEL_EXPORTER_OTLP_ENDPOINT).toBe("http://<THIS_MAC_TAILSCALE_IP>:4318");
+  expect("OTEL_EXPORTER_OTLP_HEADERS" in placeholder).toBe(false);
+});

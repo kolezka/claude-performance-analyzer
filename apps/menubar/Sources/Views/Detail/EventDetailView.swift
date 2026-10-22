@@ -27,7 +27,7 @@ struct EventDetailView: View {
             }
             refreshBar
         }
-        .task(id: id) { await load() }
+        .task(id: "\(model.selectionGeneration)/\(id)") { await load() }
     }
 
     private var refreshBar: some View {
@@ -70,7 +70,7 @@ struct EventDetailView: View {
                         Text(repo.name).font(.callout.weight(.medium))
                     }
                     let path = repo.worktree ?? repo.root
-                    Text(abbreviateHome(path))
+                    Text(displayPath(path, hostId: model.selectedHostId))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .textSelection(.enabled)
@@ -155,16 +155,18 @@ struct EventDetailView: View {
         }
     }
 
+    // Also runs from Refresh, outside .task, so it checks the generation itself.
     private func load() async {
+        let generation = model.selectionGeneration
         isLoading = true
         defer { isLoading = false }
         do {
             let d = try await model.fetchEvent(id: id)
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled, generation == model.selectionGeneration else { return }
             detail = d
             loadError = nil
         } catch {
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled, !Telemetry.isStale(error), generation == model.selectionGeneration else { return }
             loadError = error.localizedDescription
         }
     }

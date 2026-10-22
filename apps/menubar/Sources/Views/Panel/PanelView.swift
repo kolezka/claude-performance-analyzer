@@ -45,7 +45,10 @@ struct PanelView: View {
     private var header: some View {
         HStack(alignment: .center) {
             VStack(alignment: .leading, spacing: 3) {
-                Text("Claude Code").font(.headline)
+                HStack(spacing: 6) {
+                    Text("Claude Code").font(.headline)
+                    if showHostPicker { hostPicker }
+                }
                 HStack(spacing: 5) {
                     // Pulses only while events are arriving, so a calm panel stays still.
                     Image(systemName: "circle.fill")
@@ -74,6 +77,27 @@ struct PanelView: View {
             .labelsHidden()
             .fixedSize()
         }
+    }
+
+    // Someone who never added a host sees the header exactly as before.
+    private var showHostPicker: Bool {
+        model.isRemoteSelected || model.hosts.contains { !$0.isLocal }
+    }
+
+    private var hostPicker: some View {
+        Picker("Host", selection: $model.selectedHostId) {
+            ForEach(model.hosts) { host in
+                Text(host.name).tag(host.id)
+            }
+            // A saved host the collector has not confirmed yet still needs a row to show as selected.
+            if !model.hosts.contains(where: { $0.id == model.selectedHostId }) {
+                Text(model.selectedHostName).tag(model.selectedHostId)
+            }
+        }
+        .pickerStyle(.menu)
+        .labelsHidden()
+        .fixedSize()
+        .help(model.hostsError.map { "Host list unavailable: \($0)" } ?? "Which machine's telemetry to show")
     }
 
     // Uses the screen the panel is on. Its visibleFrame already excludes the menu bar and the Dock.
@@ -161,7 +185,7 @@ struct PanelView: View {
     private var footer: some View {
         HStack {
             Button("Open Dashboard", systemImage: "arrow.up.right.square") {
-                NSWorkspace.shared.open(model.collectorURL)
+                NSWorkspace.shared.open(model.dashboardURL)
             }
             .keyboardShortcut("d")
             .help("Open the dashboard in your browser (⌘D)")

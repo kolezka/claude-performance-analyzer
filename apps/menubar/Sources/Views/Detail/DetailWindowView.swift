@@ -12,6 +12,8 @@ struct DetailWindowView: View {
                 ScrollView {
                     routeContent(route).frame(maxWidth: .infinity, alignment: .leading)
                 }
+                // A host switch remounts the content, dropping every loaded detail and its tasks.
+                .id(model.selectionGeneration)
             } else {
                 EmptyState(
                     title: "Nothing selected",

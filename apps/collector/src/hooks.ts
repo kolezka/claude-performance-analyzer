@@ -5,6 +5,7 @@ import { basename, join } from "node:path";
 import { claudeDir } from "@cpa/claude-settings";
 import type { Attrs, EventRow } from "@cpa/otlp";
 import { BoundedCache } from "./bounded-cache";
+import type { HostContext } from "./hosts";
 
 export interface HookCall {
   hookEvent: string;
@@ -27,6 +28,9 @@ export interface HookDefinition {
   summary: string;
   sessions: number;
   configPath: string | null;
+  // Remote hosts only: the registration as telemetry carried it. Their config is not on this Mac.
+  hookEvent?: string;
+  hookSource?: Registration["hookSource"];
 }
 
 function num(v: unknown): number {
@@ -244,7 +248,12 @@ interface Group {
 // Builds the HookDefinition list for one hooks item: which sessions in `registeredRows"
 // (hook_registered events) registered a hook for the item's event/matcher, and what command
 // config actually configures for it, read from plugin/user/project/local settings files.
-export function buildHookDefinitions(itemName: string, registeredRows: EventRow[], repoRootForSession: (sessionId: string) => string | null): HookDefinition[] {
+export function buildHookDefinitions(
+  itemName: string,
+  registeredRows: EventRow[],
+  repoRootForSession: (sessionId: string) => string | null,
+  context: HostContext,
+): HookDefinition[] {
   const { event, matcherTarget } = splitHookItemName(itemName);
 
   const groups = new Map<string, Group>();
@@ -256,6 +265,29 @@ export function buildHookDefinitions(itemName: string, registeredRows: EventRow[
     let g = groups.get(key);
     if (!g) groups.set(key, (g = { hookSource: reg.hookSource, pluginName: reg.pluginName, hookMatcher: reg.hookMatcher, sessionIds: new Set() }));
     if (reg.sessionId) g.sessionIds.add(reg.sessionId);
+  }
+
+  const sourceOrder: Record<HookDefinition["source"], number> = { plugin: 0, user: 1, project: 2, local: 3 };
+
+  // A remote host's config files live on that host, so only what it registered is known.
+  if (!context.mayReadDisk) {
+    const remoteSource = { pluginHook: "plugin", userSettings: "user", projectSettings: "project" } as const;
+    return [...groups.values()]
+      .map(
+        (g): HookDefinition => ({
+          source: remoteSource[g.hookSource],
+          plugin: g.pluginName,
+          matcher: g.hookMatcher,
+          type: "telemetry",
+          command: null,
+          summary: "Registered on remote host",
+          sessions: g.sessionIds.size,
+          configPath: null,
+          hookEvent: event,
+          hookSource: g.hookSource,
+        }),
+      )
+      .sort((a, b) => sourceOrder[a.source] - sourceOrder[b.source] || (a.plugin ?? "").localeCompare(b.plugin ?? "") || (a.matcher ?? "").localeCompare(b.matcher ?? ""));
   }
 
   const defs: HookDefinition[] = [];
@@ -297,7 +329,6 @@ export function buildHookDefinitions(itemName: string, registeredRows: EventRow[
     return true;
   });
 
-  const sourceOrder: Record<HookDefinition["source"], number> = { plugin: 0, user: 1, project: 2, local: 3 };
   deduped.sort((a, b) => sourceOrder[a.source] - sourceOrder[b.source] || (a.plugin ?? "").localeCompare(b.plugin ?? ""));
   return deduped;
 }
