@@ -15,7 +15,8 @@ struct PanelView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            header.onGeometryChange(for: CGFloat.self) { $0.size.height } action: { headerHeight = $0 }
+            PanelHeader(model: model, windows: Prefs.parseEnabledWindows(enabledWindowsRaw))
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { headerHeight = $0 }
             // A ScrollView has no height of its own here, so it gets the measured content height,
             // capped so the panel never runs past the bottom of the screen.
             ScrollView {
@@ -42,93 +43,11 @@ struct PanelView: View {
         showDetailsWindow(using: openWindow)
     }
 
-    private var header: some View {
-        HStack(alignment: .center) {
-            VStack(alignment: .leading, spacing: 3) {
-                HStack(spacing: 6) {
-                    Text("Claude Code").font(.headline)
-                    if showHostPicker { hostPicker }
-                }
-                HStack(spacing: 5) {
-                    // Pulses only while events are arriving, so a calm panel stays still.
-                    Image(systemName: "circle.fill")
-                        .font(.system(size: 7))
-                        .foregroundStyle(stateColor)
-                        .symbolEffect(.pulse, isActive: recentlyActive)
-                    Text(stateText).contentTransition(.opacity)
-                    if let updatedAt = model.updatedAt, model.status != nil {
-                        Text("· updated \(Text(updatedAt, style: .relative)) ago")
-                    }
-                    // Keep the last numbers on a failed refresh, but say they are stale.
-                    if model.summaryError != nil, model.summary != nil, model.status != nil {
-                        Text("· refresh failed").foregroundStyle(.orange)
-                    }
-                }
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            }
-            Spacer()
-            Picker("Window", selection: $model.minutes) {
-                ForEach(Prefs.parseEnabledWindows(enabledWindowsRaw)) { option in
-                    Text(option.label).tag(option.rawValue)
-                }
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .fixedSize()
-        }
-    }
-
-    // Someone who never added a host sees the header exactly as before.
-    private var showHostPicker: Bool {
-        model.isRemoteSelected || model.hosts.contains { !$0.isLocal }
-    }
-
-    private var hostPicker: some View {
-        Picker("Host", selection: $model.selectedHostId) {
-            ForEach(model.hosts) { host in
-                Text(host.name).tag(host.id)
-            }
-            // A saved host the collector has not confirmed yet still needs a row to show as selected.
-            if !model.hosts.contains(where: { $0.id == model.selectedHostId }) {
-                Text(model.selectedHostName).tag(model.selectedHostId)
-            }
-        }
-        .pickerStyle(.menu)
-        .labelsHidden()
-        .fixedSize()
-        .help(model.hostsError.map { "Host list unavailable: \($0)" } ?? "Which machine's telemetry to show")
-    }
-
     // Uses the screen the panel is on. Its visibleFrame already excludes the menu bar and the Dock.
     // The rest is padding, the three stack gaps, the divider and a small margin under the panel.
     private var maxContentHeight: CGFloat {
         let available = screenHeight ?? NSScreen.main?.visibleFrame.height ?? 800
         return max(200, available - headerHeight - footerHeight - 28 - 42 - 1 - 16)
-    }
-
-    // "ok" covers any API request in the last 15 minutes, which is too long to call live.
-    private var recentlyActive: Bool {
-        guard model.status != nil, let newest = model.live.first else { return false }
-        return Date.now.timeIntervalSince1970 * 1000 - newest.tsMs < 60_000
-    }
-
-    private var stateColor: Color {
-        switch model.status?.state {
-        case nil: .red
-        case "slow": .orange
-        case "idle": .secondary
-        default: .green
-        }
-    }
-
-    private var stateText: String {
-        switch model.status?.state {
-        case nil: "Collector offline"
-        case "slow": "Hooks slow"
-        case "idle": "Idle"
-        default: "OK"
-        }
     }
 
     @ViewBuilder private var content: some View {

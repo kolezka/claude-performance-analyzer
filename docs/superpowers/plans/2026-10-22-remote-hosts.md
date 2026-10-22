@@ -195,7 +195,7 @@ Coverage checked against spec sections: hosts/tokens (Tasks 2 and 3), ingest/pee
 
 Tasks 1 through 6 are implemented. Task 7's automated checks and local runtime checks passed; the manual checks listed below remain open, so the PR stays a draft.
 
-- `bun test`: 271 passed, 0 failed across 45 files. The Swift harness executes 38 named checks against production types.
+- `bun test`: 272 passed, 0 failed across 46 files. The Swift host/lifecycle harness executes 38 named checks against production types. A separate NSHostingView harness verifies header bounds at all supported panel widths, including long host names and both window sets.
 - `bun run typecheck`: passed.
 - `SIGN_IDENTITY=- bun run --filter @cpa/menubar build`: passed. Both the app and bundled collector contain arm64 and x86_64 slices; ad-hoc signature verification passed. No installation or launch-agent change was performed.
 - The collector inside the built app decoded and stored all three Protobuf signals from an empty temporary working directory, preserving marker, session, host, trace-id and numeric values.
@@ -218,6 +218,6 @@ Process note: the initial HTTP module was written before its acceptance tests. I
 
 Remaining manual checks:
 
-- Rendered SwiftUI picker, Hosts tab, details window and manual Refresh behavior. Controller/model behavior and static view wiring are checked, but the GUI was not opened.
+- Full interactive Hosts-tab lifecycle, details-window and manual Refresh behavior. A native preview was opened and exposed horizontal header overflow. The follow-up layout uses a bounded host row and adaptive time controls, with real SwiftUI sizing tests and an original-layout negative control; the corrected preview was launched.
 - Actual remote Linux/macOS-to-Mac traffic. The supplied machines currently use different tailnets; no network profile was switched.
 - OS clipboard behavior, macOS firewall prompts, notarization and installed launchd behavior. Clipboard wiring was tested with an in-memory substitute, and the app build was ad-hoc signed only.
