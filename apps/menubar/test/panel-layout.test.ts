@@ -56,6 +56,9 @@ test.skipIf(process.platform !== "darwin")(
       const declared = [...(await Bun.file(harness).text()).matchAll(/h\.run\("([^"]+)"/g)].map((m) => m[1]);
       const required = [
         "probe reports a fixed-size child wider than the panel",
+        "scroll probe detects genuine overflow",
+        "panel refresh does not enable a scrollbar when content fits",
+        "overflowing panel remains scrollable across refresh",
         "long host name has 80 characters",
         "local-only header fits every panel width with every window enabled",
         "remote host header fits every panel width with every window enabled",

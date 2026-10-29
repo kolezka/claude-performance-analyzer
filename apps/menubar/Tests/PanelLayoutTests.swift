@@ -132,6 +132,21 @@ let allWindows = Prefs.WindowOption.allCases
 let defaultWindows = Prefs.parseEnabledWindows(Prefs.Defaults.enabledWindowsRaw)
 let longHostName: String = String(String(repeating: "very-long-remote-host-name-", count: 3).prefix(80))
 
+@MainActor
+func scrollViews(in view: NSView) -> [NSScrollView] {
+    (view as? NSScrollView).map { [$0] } ?? view.subviews.flatMap { scrollViews(in: $0) }
+}
+
+@MainActor
+func settle(_ host: NSView, window: NSWindow, seconds: Double) {
+    let end = Date().addingTimeInterval(seconds)
+    while Date() < end {
+        RunLoop.current.run(until: Date().addingTimeInterval(0.01))
+        host.layoutSubtreeIfNeeded()
+        window.displayIfNeeded()
+    }
+}
+
 @main
 struct PanelLayoutTests {
     @MainActor
@@ -143,6 +158,131 @@ struct PanelLayoutTests {
             let r = render(Text(String(repeating: "W", count: 80)).fixedSize(), available: 332)
             print("  control: \(describe(r))")
             h.check(r.fitted.width > r.available + 50, "probe missed an overflowing child: \(describe(r))")
+        }
+
+        h.run("scroll probe detects genuine overflow") {
+            let host = NSHostingView(rootView: ScrollView { Color.red.frame(width: 200, height: 300) }.frame(width: 200, height: 100))
+            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 200, height: 100), styleMask: [.borderless], backing: .buffered, defer: false)
+            window.contentView = host
+            host.frame = NSRect(x: 0, y: 0, width: 200, height: 100)
+            settle(host, window: window, seconds: 0.2)
+            if let scroll = scrollViews(in: host).first, let document = scroll.documentView {
+                scroll.scrollerStyle = .overlay
+                let overflow = document.frame.height - scroll.contentView.bounds.height
+                print("  overflow control: \(overflow)")
+                h.check(overflow > 100, "probe failed to detect genuine overflow: \(overflow)")
+                h.check(scroll.hasVerticalScroller && scroll.verticalScroller?.isHidden == false,
+                        "probe did not detect an enabled scroller")
+            } else {
+                h.check(false, "overflow control did not render an NSScrollView and document")
+            }
+            window.contentView = nil
+        }
+
+        h.run("panel refresh does not enable a scrollbar when content fits") {
+            let name = (prefsDirectory as NSString).appendingPathComponent("cpa.panel.scroll.\(UUID().uuidString)")
+            let defaults = UserDefaults(suiteName: name)!
+            for key in [Prefs.Key.showKpis, Prefs.Key.showLatencyChart, Prefs.Key.showBreakdown,
+                        Prefs.Key.showSlowest, Prefs.Key.showTotalTime, Prefs.Key.showWaterfall] {
+                defaults.set(false, forKey: key)
+            }
+            defaults.set(true, forKey: Prefs.Key.showLiveFeed)
+            defaults.set(15, forKey: Prefs.Key.liveFeedLength)
+            let model = Telemetry(defaults: defaults, startPolling: false)
+            model.status = Status(label: "OK", state: "ok", values: nil)
+            model.summary = Summary(
+                eventCount: 12,
+                kpis: Summary.Kpis(sessions: 1, apiP50: 1, apiP95: 2, ttftP50: nil, turnP50: 3, costUsd: 0, cacheHitRatio: 0),
+                breakdown: Summary.Breakdown(api: 1, tools: 1, hooks: 1),
+                apiSeries: Summary.Series(points: []), hooks: [], tools: [], subagents: []
+            )
+            model.live = (0..<12).map { i in
+                LiveEvent(tsMs: Double(i) * 1000, kind: "tool", label: "Event \(i)", ms: nil, ok: true, sessionId: nil, id: nil)
+            }
+            let root = PanelView(model: model, screenHeightOverride: 800).defaultAppStorage(defaults)
+            let host = NSHostingView(rootView: root)
+            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 360, height: 900), styleMask: [.borderless], backing: .buffered, defer: false)
+            window.contentView = host
+            host.frame = NSRect(x: 0, y: 0, width: 360, height: 900)
+            settle(host, window: window, seconds: 0.5)
+            guard let scroll = scrollViews(in: host).first, let document = scroll.documentView else {
+                h.check(false, "production panel did not render an NSScrollView and document")
+                window.contentView = nil
+                model.stopPolling()
+                defaults.removePersistentDomain(forName: name)
+                return
+            }
+            scroll.scrollerStyle = .overlay
+            let initialOverflow = document.frame.height - scroll.contentView.bounds.height
+            h.check(initialOverflow <= 0.5, "fixture must initially fit, overflow \(initialOverflow)")
+            let initialHeight = document.frame.height
+            withAnimation(.smooth(duration: 0.35)) { model.live = Array(model.live.prefix(5)) }
+            var peakOverflow: CGFloat = 0
+            var enabledSamples = 0
+            for _ in 0..<35 {
+                settle(host, window: window, seconds: 0.02)
+                peakOverflow = max(peakOverflow, document.frame.height - scroll.contentView.bounds.height)
+                if scroll.hasVerticalScroller && scroll.verticalScroller?.isHidden == false { enabledSamples += 1 }
+            }
+            print("  panel: initialHeight=\(initialHeight) finalHeight=\(document.frame.height) peakOverflow=\(peakOverflow) enabledSamples=\(enabledSamples)")
+            h.check(document.frame.height < initialHeight - 10, "fixture did not shrink the panel content")
+            h.check(enabledSamples == 0, "fitting panel enabled a scrollbar in \(enabledSamples) samples")
+            window.contentView = nil
+            model.stopPolling()
+            defaults.removePersistentDomain(forName: name)
+        }
+
+        h.run("overflowing panel remains scrollable across refresh") {
+            let name = (prefsDirectory as NSString).appendingPathComponent("cpa.panel.overflow.\(UUID().uuidString)")
+            let defaults = UserDefaults(suiteName: name)!
+            for key in [Prefs.Key.showKpis, Prefs.Key.showLatencyChart, Prefs.Key.showBreakdown,
+                        Prefs.Key.showSlowest, Prefs.Key.showTotalTime, Prefs.Key.showWaterfall, Prefs.Key.showLiveFeed] {
+                defaults.set(true, forKey: key)
+            }
+            defaults.set(15, forKey: Prefs.Key.liveFeedLength)
+            defaults.set(8, forKey: Prefs.Key.rowsPerList)
+            let model = Telemetry(defaults: defaults, startPolling: false)
+            model.status = Status(label: "OK", state: "ok", values: nil)
+            let stats = (0..<8).map { Stats(name: "Task \($0)", totalMs: Double($0 + 1), p95: Double($0 + 1)) }
+            model.summary = Summary(
+                eventCount: 15,
+                kpis: Summary.Kpis(sessions: 1, apiP50: 1, apiP95: 2, ttftP50: nil, turnP50: 3, costUsd: 0, cacheHitRatio: 0),
+                breakdown: Summary.Breakdown(api: 1, tools: 1, hooks: 1),
+                apiSeries: Summary.Series(points: []), hooks: stats, tools: stats, subagents: stats
+            )
+            model.live = (0..<15).map { i in
+                LiveEvent(tsMs: Double(i) * 1000, kind: "tool", label: "Event \(i)", ms: nil, ok: true, sessionId: nil, id: nil)
+            }
+            let host = NSHostingView(rootView: PanelView(model: model, screenHeightOverride: 400).defaultAppStorage(defaults))
+            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 360, height: 1200), styleMask: [.borderless], backing: .buffered, defer: false)
+            window.contentView = host
+            host.frame = NSRect(x: 0, y: 0, width: 360, height: 1200)
+            settle(host, window: window, seconds: 0.5)
+            guard let scroll = scrollViews(in: host).first, let document = scroll.documentView else {
+                h.check(false, "overflowing panel did not render an NSScrollView and document")
+                window.contentView = nil
+                model.stopPolling()
+                defaults.removePersistentDomain(forName: name)
+                return
+            }
+            scroll.scrollerStyle = .overlay
+            let overflow = document.frame.height - scroll.contentView.bounds.height
+            print("  overflowing panel: document=\(document.frame.height) clip=\(scroll.contentView.bounds.height) overflow=\(overflow)")
+            h.check(overflow > 20, "fixture must exceed the panel cap, overflow \(overflow)")
+            h.check(scroll.contentView.bounds.height < 400, "panel ignored its 400-point screen height")
+            h.check(scroll.hasVerticalScroller, "overflowing panel must enable its vertical scroller")
+            scroll.contentView.scroll(to: NSPoint(x: 0, y: 20))
+            scroll.reflectScrolledClipView(scroll.contentView)
+            let before = scroll.contentView.bounds.origin.y
+            h.check(before > 10, "fixture could not scroll, offset \(before)")
+            withAnimation(.smooth(duration: 0.35)) { model.live = Array(model.live.reversed()) }
+            settle(host, window: window, seconds: 0.7)
+            let after = scroll.contentView.bounds.origin.y
+            h.check(scroll.hasVerticalScroller, "refresh disabled the overflowing panel scroller")
+            h.check(abs(before - after) <= 2, "refresh moved scroll position from \(before) to \(after)")
+            window.contentView = nil
+            model.stopPolling()
+            defaults.removePersistentDomain(forName: name)
         }
 
         h.run("long host name has 80 characters") {

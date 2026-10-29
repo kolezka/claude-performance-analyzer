@@ -3,6 +3,7 @@ import SwiftUI
 
 struct PanelView: View {
     @Bindable var model: Telemetry
+    var screenHeightOverride: CGFloat?
     @Environment(\.openSettings) private var openSettings
     @Environment(\.openWindow) private var openWindow
     @AppStorage(Prefs.Key.panelWidth) private var panelWidth = Prefs.Defaults.panelWidth
@@ -25,6 +26,8 @@ struct PanelView: View {
                     .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { contentHeight = $0 }
             }
             .scrollBounceBehavior(.basedOnSize)
+            // Ignore temporary overflow while fitting content animates to its new height.
+            .scrollDisabled(contentHeight <= maxContentHeight)
             .frame(height: min(contentHeight, maxContentHeight))
             Divider()
             footer.onGeometryChange(for: CGFloat.self) { $0.size.height } action: { footerHeight = $0 }
@@ -46,7 +49,7 @@ struct PanelView: View {
     // Uses the screen the panel is on. Its visibleFrame already excludes the menu bar and the Dock.
     // The rest is padding, the three stack gaps, the divider and a small margin under the panel.
     private var maxContentHeight: CGFloat {
-        let available = screenHeight ?? NSScreen.main?.visibleFrame.height ?? 800
+        let available = screenHeightOverride ?? screenHeight ?? NSScreen.main?.visibleFrame.height ?? 800
         return max(200, available - headerHeight - footerHeight - 28 - 42 - 1 - 16)
     }
 
