@@ -51,15 +51,15 @@ export function renderedContext(hookName: string, content: string[]): string {
   return `<system-reminder>\n${hookName} hook additional context: ${content.join("\n")}\n</system-reminder>`;
 }
 
-export function hookSuccess(hookEvent: string, command: string, stdout: string, durationMs: number, tsMs: number): string {
+export function hookSuccess(hookEvent: string, command: string, stdout: string, durationMs: number, tsMs: number, toolUseID?: string): string {
   return attachmentLine(
-    { type: "hook_success", hookName: `${hookEvent}:startup`, hookEvent, content: "", command, durationMs, exitCode: 0, stdout, stderr: "" },
+    { type: "hook_success", hookName: `${hookEvent}:startup`, toolUseID, hookEvent, content: "", command, durationMs, exitCode: 0, stdout, stderr: "" },
     tsMs,
   );
 }
 
-export function hookContext(hookEvent: string, content: string[], tsMs: number, hookName = hookEvent): string {
-  return attachmentLine({ type: "hook_additional_context", hookName, hookEvent, content }, tsMs);
+export function hookContext(hookEvent: string, content: string[], tsMs: number, hookName = hookEvent, toolUseID?: string): string {
+  return attachmentLine({ type: "hook_additional_context", hookName, toolUseID, hookEvent, content }, tsMs);
 }
 
 export function readLine(path: string, tsMs: number, toolUseId = "t1", extraInput: Record<string, unknown> = {}): string {
@@ -74,7 +74,8 @@ export function readLine(path: string, tsMs: number, toolUseId = "t1", extraInpu
   });
 }
 
-export function toolResultLine(promptId: string, toolUseId: string, isError: boolean, tsMs: number): string {
+// A Read's tool result. Claude Code records what came back in toolUseResult.file.
+export function toolResultLine(promptId: string, toolUseId: string, isError: boolean, tsMs: number, file?: { startLine: number; numLines: number; totalLines: number }): string {
   return JSON.stringify({
     parentUuid: null,
     isSidechain: false,
@@ -84,6 +85,7 @@ export function toolResultLine(promptId: string, toolUseId: string, isError: boo
     uuid: `tr-${tsMs}`,
     timestamp: iso(tsMs),
     sessionId: SID,
+    ...(file ? { toolUseResult: { type: "text", file: { filePath: PERSISTED_PATH, content: "x", ...file } } } : {}),
   });
 }
 

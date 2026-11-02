@@ -157,6 +157,8 @@ Without remote hosts, nothing leaves your machine. With them, each remote machin
 claude mcp add --scope user cpa-harness -- bun "$PWD/apps/mcp/src/index.ts"
 ```
 
+Run it with Bun from the source tree: `harness_query` starts a Bun child process for each query.
+
 | Tool | Answers |
 | --- | --- |
 | `harness_summary` | Start here: hook time, injected text and the Hindsight share in one answer |

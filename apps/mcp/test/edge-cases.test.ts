@@ -4,6 +4,7 @@ import { rmSync } from "node:fs";
 import { join } from "node:path";
 import { gather, UserError } from "../src/gather";
 import { createServer } from "../src/protocol";
+import { runIsolatedQuery } from "../src/query";
 import { harnessTools } from "../src/tools";
 import { parseTranscript } from "../src/transcript";
 import {
@@ -133,6 +134,63 @@ test("counts include the wrapper text Claude Code adds around hook output", () =
   const raw = parseTranscript(attachmentLine({ type: "hook_additional_context", hookName: "SessionStart", hookEvent: "SessionStart", content }, T0));
   expect(raw.blocks.reduce((sum, b) => sum + b.chars, 0)).toBe(content.join("").length);
 });
+
+test("output a hook printed in one prompt is never credited to another prompt's or another tool call's block", () => {
+  const d = parseTranscript(
+    [
+      promptLine("p1", "one", T0),
+      hookSuccess("PreToolUse", "old-command", ctxJson("shared"), 5, T0 + 1, "toolu_A"),
+      hookContext("PreToolUse", ["other"], T0 + 2, "PreToolUse:Bash", "toolu_A"),
+      promptLine("p2", "two", T0 + 10_000),
+      hookContext("PreToolUse", ["shared"], T0 + 10_001, "PreToolUse:Read", "toolu_B"),
+      hookSuccess("SessionStart", "start-cmd", ctxJson("again"), 5, T0 + 10_002),
+      promptLine("p3", "three", T0 + 20_000),
+      hookContext("SessionStart", ["again"], T0 + 20_001),
+    ].join("\n"),
+  );
+  expect(d.blocks.map((b) => b.command)).toEqual([null, null, null]);
+  // The same tool call still links its run to its block.
+  const linked = parseTranscript(
+    [promptLine("p1", "one", T0), hookSuccess("PreToolUse", "guard", ctxJson("note"), 5, T0 + 1, "toolu_C"), hookContext("PreToolUse", ["note"], T0 + 2, "PreToolUse:Bash", "toolu_C")].join("\n"),
+  );
+  expect(linked.blocks.map((b) => b.command)).toEqual(["guard"]);
+});
+
+test("a Read that returned only part of the saved file is not a read-back, even with no limit asked", () => {
+  const base = [promptLine("p1", "hi", T0), readLine(PERSISTED_PATH, T0 + 2, "t5")];
+  const firstPart = parseTranscript([...base, toolResultLine("p1", "t5", false, T0 + 3, { startLine: 1, numLines: 2000, totalLines: 3000 })].join("\n"));
+  expect(firstPart.readPaths).toEqual([]);
+  const whole = parseTranscript([...base, toolResultLine("p1", "t5", false, T0 + 3, { startLine: 1, numLines: 36, totalLines: 36 })].join("\n"));
+  expect(whole.readPaths).toEqual([PERSISTED_PATH]);
+});
+
+test("a query killed while its input is still being sent fails cleanly, with no stray pipe error", async () => {
+  writeTranscript(env, "-work-demo", SID, sessionTranscript());
+  const h = await gather({}, current);
+  const big = h.blocks[0]!;
+  // About 20 MB of input, so the child is killed long before it has read it all.
+  h.blocks = Array.from({ length: 10_000 }, (_, i) => ({ ...big, tsMs: i, hash: String(i), preview: "p".repeat(2048) }));
+  process.env.CPA_MCP_QUERY_TIMEOUT_MS = "1";
+  const unhandled: unknown[] = [];
+  const onUnhandled = (err: unknown) => unhandled.push(err);
+  process.on("unhandledRejection", onUnhandled);
+  try {
+    await expect(runIsolatedQuery(h, "SELECT count(*) FROM blocks")).rejects.toThrow(UserError);
+    await Bun.sleep(200);
+  } finally {
+    process.off("unhandledRejection", onUnhandled);
+    delete process.env.CPA_MCP_QUERY_TIMEOUT_MS;
+  }
+  expect(unhandled).toEqual([]);
+}, 20_000);
+
+test("every query answer stays under the output cap, including one with no rows", async () => {
+  delete process.env.CPA_MCP_QUERY_TIMEOUT_MS;
+  writeTranscript(env, "-work-demo", SID, sessionTranscript());
+  const h = await gather({}, current);
+  const text = await runIsolatedQuery(h, `SELECT 1 AS "${"c".repeat(100_000)}" WHERE 0`);
+  expect(text.length).toBeLessThan(70_000);
+}, 20_000);
 
 test("notifications never get a reply, whatever the method", async () => {
   const server = createServer({ name: "t", version: "1" }, []);

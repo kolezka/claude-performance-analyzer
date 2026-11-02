@@ -137,13 +137,24 @@ const TIMESTAMP = /"timestamp":"([^"]+)"/;
 // A hook attachment line opens with its attachment object; the outer "type":"attachment" only
 // comes after the content, so a line cut short inside the content is recognised by this head.
 const ATTACHMENT_HEAD = /^\{[^{]*"attachment":\{"type":"hook_/;
-// Output a hook printed waits this long for the context block it became, then is dropped.
-const PENDING_MS = 5 * 60_000;
+const PENDING_MAX = 200;
 
+// Output a hook printed, waiting to be matched to the context block it became. A tool event's
+// run and its block share the tool call id; other events (SessionStart, ...) share no id, so
+// they only match within the same prompt. Either way, one firing never feeds another.
 interface Pending {
   command: string;
   text: string;
-  tsMs: number;
+  hookEvent: string;
+  promptId: string | null;
+  toolUseId: string | null;
+}
+
+const isToolCallId = (id: string | null): id is string => id !== null && id.startsWith("toolu_");
+
+function sameFiring(pending: Pending[], hookEvent: string, promptId: string | null, toolUseId: string | null): Pending[] {
+  if (isToolCallId(toolUseId)) return pending.filter((p) => p.hookEvent === hookEvent && p.toolUseId === toolUseId);
+  return pending.filter((p) => p.hookEvent === hookEvent && p.promptId === promptId && !isToolCallId(p.toolUseId));
 }
 
 // Total length of the text Claude Code recorded as sent for this line, or null if not recorded.
@@ -172,12 +183,25 @@ function addWrapper(blocks: InjectedBlock[], rendered: number | null) {
 
 // The command whose printed output this block is: exact text, or for persisted output, the
 // command whose full output starts with the whole preview. Two different commands matching
-// means the transcript cannot tell them apart, so nobody gets it.
-function takeCommand(waiting: Pending[], body: string, persisted: boolean): string | null {
-  const hits = waiting.filter((p) => p.text === body || (persisted && body.length > 0 && p.text.startsWith(body)));
+// means the transcript cannot tell them apart, so nobody gets it. A match is used up.
+function takeCommand(pending: Pending[], candidates: Pending[], body: string, persisted: boolean): string | null {
+  const hits = candidates.filter((p) => p.text === body || (persisted && body.length > 0 && p.text.startsWith(body)));
   if (hits.length === 0 || new Set(hits.map((h) => h.command)).size !== 1) return null;
-  waiting.splice(waiting.indexOf(hits[0]!), 1);
+  for (const list of [pending, candidates]) {
+    const i = list.indexOf(hits[0]!);
+    if (i !== -1) list.splice(i, 1);
+  }
   return hits[0]!.command;
+}
+
+// Whether a Read's result covered the whole file. Claude Code records the returned line range
+// in toolUseResult.file; without it, only a request with no offset or limit counts.
+function readWholeFile(row: any): boolean {
+  const file = row?.toolUseResult?.file;
+  if (!file || typeof file !== "object") return true;
+  const { startLine, numLines, totalLines } = file;
+  if (typeof startLine !== "number" || typeof numLines !== "number" || typeof totalLines !== "number") return true;
+  return startLine <= 1 && numLines >= totalLines;
 }
 
 export function parseTranscript(text: string, agentId: string | null = null, sessionId: string | null = null): TranscriptData {
@@ -197,7 +221,7 @@ export function parseTranscript(text: string, agentId: string | null = null, ses
   const seenPrompts = new Set<string>();
   let promptId: string | null = null;
   // Context each hook command printed, waiting to be matched to the block it became.
-  const pending = new Map<string, Pending[]>();
+  let pending: Pending[] = [];
   // Whole-file Reads of saved hook output, waiting for their tool result.
   const pendingReads = new Map<string, string>();
 
@@ -293,7 +317,7 @@ export function parseTranscript(text: string, agentId: string | null = null, ses
       const path = part?.type === "tool_result" ? pendingReads.get(part.tool_use_id) : undefined;
       if (path === undefined) continue;
       pendingReads.delete(part.tool_use_id);
-      if (part.is_error !== true) data.readPaths.push(path);
+      if (part.is_error !== true && readWholeFile(row)) data.readPaths.push(path);
     }
   }
 
@@ -302,6 +326,7 @@ export function parseTranscript(text: string, agentId: string | null = null, ses
     const hookEvent = own(String(a.hookEvent ?? ""));
     const hookName = own(String(a.hookName ?? hookEvent));
     const tsMs = tsOf(row.timestamp);
+    const toolUseId = typeof a.toolUseID === "string" ? a.toolUseID : null;
     const base = { sessionId: data.sessionId ?? "", agentId, tsMs, promptId, hookEvent, hookName };
 
     if (typeof a.command === "string" && (type === "hook_success" || "durationMs" in a || "exitCode" in a)) {
@@ -309,20 +334,18 @@ export function parseTranscript(text: string, agentId: string | null = null, ses
       data.runs.push({ ...base, command, durationMs: numOrNull(a.durationMs), exitCode: numOrNull(a.exitCode) });
       const ctx = typeof a.stdout === "string" ? contextFromStdout(hookEvent, a.stdout) : null;
       if (ctx) {
-        const list = pending.get(hookEvent) ?? [];
-        list.push({ command, text: ctx, tsMs });
-        pending.set(hookEvent, list.slice(-50));
+        pending.push({ command, text: ctx, hookEvent, promptId, toolUseId: toolUseId === null ? null : own(toolUseId) });
+        if (pending.length > PENDING_MAX) pending = pending.slice(-PENDING_MAX);
       }
     }
 
     if (type === "hook_additional_context") {
       const parts: unknown[] = Array.isArray(a.content) ? a.content : [a.content];
-      const waiting = (pending.get(hookEvent) ?? []).filter((p) => tsMs - p.tsMs <= PENDING_MS);
-      pending.set(hookEvent, waiting);
+      const candidates = sameFiring(pending, hookEvent, promptId, toolUseId);
       const made: InjectedBlock[] = [];
       for (const part of parts) {
         if (typeof part !== "string" || !part) continue;
-        made.push(blockFrom(base, "context", part, waiting));
+        made.push(blockFrom(base, "context", part, pending, candidates));
       }
       addWrapper(made, renderedLength(row));
       data.blocks.push(...made);
@@ -330,7 +353,7 @@ export function parseTranscript(text: string, agentId: string | null = null, ses
       const be = a.blockingError;
       const text = typeof be === "string" ? be : typeof be?.blockingError === "string" ? be.blockingError : null;
       if (!text) return;
-      const block = blockFrom(base, "blocking_error", text, []);
+      const block = blockFrom(base, "blocking_error", text, [], []);
       block.command = typeof be?.command === "string" ? own(be.command) : null;
       addWrapper([block], renderedLength(row));
       data.blocks.push(block);
@@ -342,7 +365,8 @@ function blockFrom(
   base: Omit<InjectedBlock, "kind" | "chars" | "tag" | "family" | "signature" | "preview" | "hash" | "command" | "persisted">,
   kind: InjectedBlock["kind"],
   text: string,
-  waiting: Pending[],
+  pending: Pending[],
+  candidates: Pending[],
 ): InjectedBlock {
   const unwrapped = unwrapPersisted(text);
   const body = unwrapped ? unwrapped.body : text;
@@ -357,7 +381,7 @@ function blockFrom(
     signature: own(signatureOf(body, tag)),
     preview: own((p ? `[persisted ${p.reportedSize ?? "?"}] ` : "") + oneLine(body)),
     hash: hashOf(text),
-    command: takeCommand(waiting, body, unwrapped !== null),
+    command: takeCommand(pending, candidates, body, unwrapped !== null),
     persisted: p ? { reportedSize: own(p.reportedSize), path: own(p.path), readBack: false } : null,
   };
 }

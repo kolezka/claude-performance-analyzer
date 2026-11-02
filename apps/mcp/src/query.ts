@@ -12,6 +12,7 @@ export { QUERY_SCHEMA } from "./query-db";
 
 const CHILD = join(import.meta.dir, "query-child.ts");
 const DEFAULT_TIMEOUT_MS = 10_000;
+const MAX_OUTPUT_BYTES = 1024 * 1024;
 
 function timeoutMs(): number {
   const n = Number(process.env.CPA_MCP_QUERY_TIMEOUT_MS);
@@ -36,14 +37,30 @@ export async function runIsolatedQuery(h: Harness, sql: string): Promise<string>
   const clean = checkSql(sql);
   const limit = timeoutMs();
   const started = performance.now();
-  const child = Bun.spawn([process.execPath, CHILD], { stdin: "pipe", stdout: "pipe", stderr: "pipe", timeout: limit, killSignal: "SIGKILL" });
-  child.stdin.write(JSON.stringify({ rows: queryRows(h), sql: clean, telemetry: telemetryPath() }));
-  child.stdin.end();
-  const [out, err] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text()]);
+  const child = Bun.spawn([process.execPath, CHILD], {
+    stdin: "pipe",
+    stdout: "pipe",
+    stderr: "pipe",
+    timeout: limit,
+    killSignal: "SIGKILL",
+    // The child caps its own answer; this only stops one that misbehaves.
+    maxBuffer: MAX_OUTPUT_BYTES,
+  });
+  // A child killed mid-transfer closes its stdin; the write then fails with EPIPE. That is
+  // the expected end of a timed-out query, so it is caught here and reported below.
+  const feed = (async () => {
+    try {
+      child.stdin.write(JSON.stringify({ rows: queryRows(h), sql: clean, telemetry: telemetryPath() }));
+      await child.stdin.end();
+    } catch {
+      // The exit status below says what happened.
+    }
+  })();
+  const [out, err] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), feed]);
   await child.exited;
   if (child.signalCode) {
     if (performance.now() - started >= limit) throw new UserError(`Query timed out after ${limit / 1000}s and was stopped. Narrow it or add LIMIT.`);
-    throw new UserError(`Query process was killed (${child.signalCode}), likely out of memory.`);
+    throw new UserError(`Query process was killed (${child.signalCode}): it used too much memory or produced too much output.`);
   }
   let reply: { ok: boolean; text?: string; error?: string };
   try {

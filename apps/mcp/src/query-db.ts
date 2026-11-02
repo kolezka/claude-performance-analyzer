@@ -60,6 +60,10 @@ function cell(v: unknown): string {
   return s.length > MAX_CELL ? `${s.slice(0, MAX_CELL - 1)}…` : s;
 }
 
+function capped(text: string): string {
+  return text.length > MAX_TEXT ? `${text.slice(0, MAX_TEXT)}\n(cut at ${MAX_TEXT} characters; select fewer or shorter columns)` : text;
+}
+
 export function runQuery(db: Database, sql: string): string {
   const stmt = db.query(checkSql(sql));
   // Iterate instead of all(): a careless SELECT over tel.events must not load every row.
@@ -72,10 +76,10 @@ export function runQuery(db: Database, sql: string): string {
     }
     rows.push(r);
   }
-  if (!rows.length) return `0 rows. Columns: ${stmt.columnNames.join(", ")}`;
   const cols = stmt.columnNames;
-  let text = [cols.join(" | "), ...rows.map((r) => cols.map((c) => cell(r[c])).join(" | "))].join("\n");
-  if (text.length > MAX_TEXT) text = `${text.slice(0, MAX_TEXT)}\n(cut at ${MAX_TEXT} characters; select fewer columns)`;
+  const header = cols.map(cell);
+  if (!rows.length) return capped(`0 rows. Columns: ${header.join(", ")}`);
+  let text = capped([header.join(" | "), ...rows.map((r) => cols.map((c) => cell(r[c])).join(" | "))].join("\n"));
   if (more) text += `\n(stopped at ${MAX_ROWS} rows; add LIMIT or aggregate)`;
   return text;
 }
