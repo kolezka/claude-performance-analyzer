@@ -38,6 +38,7 @@ A slow Claude Code turn can come from many places: the model, a long Bash call, 
 - **Live feed.** Hook, tool and model events as they arrive, within a few seconds.
 - **Web dashboard.** Turn waterfall, recent prompts, skills, subagents, models, permission decisions, MCP connect times, errors and compaction.
 - **One-click setup.** The dashboard adds the needed telemetry variables to `~/.claude/settings.json`, keeps your existing values and writes a backup first.
+- **MCP server for coding agents.** An agent can ask what its own harness costs: hook time, how much text hooks inject into context, and how much of that is Hindsight memory.
 - **Remote hosts.** Other Linux or macOS machines on your tailnet can send their telemetry here, each with its own token. Pick a host in the panel or the dashboard to see its numbers.
 - **Private by design.** With no remote hosts the collector listens on `127.0.0.1` only. Data stays in a local SQLite file for 14 days.
 
@@ -148,6 +149,34 @@ Claude Code exports logs, metrics and traces over OTLP. The collector decodes th
 
 Without remote hosts, nothing leaves your machine. With them, each remote machine's telemetry crosses your tailnet to this Mac, authenticated by its token. Stored data and every API read stay on this Mac. Every stored row carries the host its token belongs to, and each read shows one host at a time.
 
+## Ask from a coding agent (MCP)
+
+`apps/mcp` is a stdio MCP server an agent can call to see what its harness costs, so it can trim or fix hooks, plugins and memory settings. It only reads: it never changes settings or hooks.
+
+```bash
+claude mcp add --scope user cpa-harness -- bun "$PWD/apps/mcp/src/index.ts"
+```
+
+| Tool | Answers |
+| --- | --- |
+| `harness_summary` | Start here: hook time, injected text and the Hindsight share in one answer |
+| `hook_time` | Per hook: firings, total, p50, p95, max, errors, share of active turn time, and per-command runs with the plugin or settings file that owns them |
+| `injected_context` | What hooks put into the model's context, grouped by source, event, prompt, session or project, with owners and identical repeats |
+| `memory_cost` | Hindsight injection by tag, per prompt, recalls too large for context and whether the agent read them back |
+| `harness_query` | One read-only SQL query over the same data and the telemetry tables |
+
+Every tool takes `session`: `current` (default), `all`, or a session id. `since` (`15m`, `1h`, `24h`, `7d`) and `project` narrow it down. `current` is the session that started the server, from `CLAUDE_CODE_SESSION_ID`; each answer names the session it used.
+
+Where the numbers come from:
+
+- Hook time comes from the collector's telemetry. All hooks of one event run in parallel, so a firing's time is wall time, not per script. Per-command times come from the transcripts, which Claude Code writes only for some hooks.
+- Injected text comes from the session transcripts in `~/.claude/projects`, counted as the model received it. Output too large for context counts as the preview Claude Code showed. Telemetry's own character count differs: it counts that output at full size and does not see every hook.
+- Tokens are estimates: characters / 4.
+- A block that no recorded hook run printed is reported as unattributed, with the hooks configured for that event. Hindsight blocks are recognised by their `<hindsight_*>` tags.
+- Transcripts stay on the machine that ran the session, so the server covers sessions on this Mac, not remote hosts.
+
+`bun apps/mcp/scripts/probe.ts harness_summary '{"session":"all","since":"7d"}'` runs one tool from the shell and prints how long it took.
+
 ## Project layout
 
 Bun workspaces. Each package has its own `src/` and `test/`.
@@ -156,6 +185,7 @@ Bun workspaces. Each package has its own `src/` and `test/`.
 | --- | --- |
 | `apps/collector` | Bun OTLP receiver (http/json or http/protobuf, gzip ok) on `127.0.0.1:4318`, or on all addresses while remote hosts exist. Stores to SQLite with 14 day retention, partitioned by host. Serves the dashboard and the JSON API. `scripts/compile.ts` builds it into a standalone binary for the app bundle. |
 | `apps/dashboard` | Svelte web dashboard, bundled by the collector through its HTML import. |
+| `apps/mcp` | Read-only stdio MCP server for coding agents: hook time, hook-injected context and Hindsight memory cost, from telemetry and session transcripts. |
 | `apps/menubar` | SwiftUI menu bar app (`MenuBarExtra`), built with `swiftc` into a universal (arm64 and x86_64) `.app`. Bundles the compiled collector and runs it as a LaunchAgent. Code in `Sources/`, plists and icon in `Resources/`, build and release in `scripts/`. |
 | `packages/otlp` | Decodes OTLP http/json and http/protobuf into rows. |
 | `packages/analytics` | Summaries, percentiles, turn timelines. Shared by the collector and the dashboard. |

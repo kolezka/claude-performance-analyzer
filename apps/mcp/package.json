@@ -1,0 +1,14 @@
+{
+  "name": "@cpa/mcp",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "start": "bun src/index.ts"
+  },
+  "dependencies": {
+    "@cpa/analytics": "workspace:*",
+    "@cpa/claude-settings": "workspace:*",
+    "@cpa/collector": "workspace:*",
+    "@cpa/otlp": "workspace:*"
+  }
+}

@@ -30,6 +30,15 @@
         "svelte": "^5.57.1",
       },
     },
+    "apps/mcp": {
+      "name": "@cpa/mcp",
+      "dependencies": {
+        "@cpa/analytics": "workspace:*",
+        "@cpa/claude-settings": "workspace:*",
+        "@cpa/collector": "workspace:*",
+        "@cpa/otlp": "workspace:*",
+      },
+    },
     "apps/menubar": {
       "name": "@cpa/menubar",
     },
@@ -60,6 +69,8 @@
     "@cpa/collector": ["@cpa/collector@workspace:apps/collector"],
 
     "@cpa/dashboard": ["@cpa/dashboard@workspace:apps/dashboard"],
+
+    "@cpa/mcp": ["@cpa/mcp@workspace:apps/mcp"],
 
     "@cpa/menubar": ["@cpa/menubar@workspace:apps/menubar"],
 
