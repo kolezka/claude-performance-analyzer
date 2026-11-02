@@ -7,7 +7,7 @@ export interface Persisted {
   // Size as Claude Code reported it ("12.8KB") and where it saved the full output.
   reportedSize: string | null;
   path: string | null;
-  // Set later by the caller: whether the agent opened the saved file with Read.
+  // Set later by the caller: whether the agent read the whole saved file back successfully.
   readBack: boolean;
 }
 
@@ -19,7 +19,8 @@ export interface InjectedBlock {
   hookEvent: string;
   hookName: string;
   kind: "context" | "blocking_error";
-  // Characters the model saw. For persisted output that is the preview, not the full file.
+  // Characters the model saw: the hook text plus its share of the reminder wrapper Claude Code
+  // puts around it, when the transcript records that. Persisted output counts as its preview.
   chars: number;
   tag: string | null;
   family: "hindsight" | null;
@@ -52,7 +53,8 @@ export interface TranscriptData {
   prompts: { id: string; tsMs: number }[];
   blocks: InjectedBlock[];
   runs: HookRun[];
-  // Paths the agent opened with Read; used to mark persisted hook output as read back.
+  // Saved hook output the agent read back in full: a Read with no offset or limit whose result
+  // was not an error.
   readPaths: string[];
   badLines: number;
 }
@@ -132,15 +134,55 @@ function numOrNull(v: unknown): number | null {
 const PROMPT_ID = /"promptId":"([^"]+)"/;
 // Quotes inside string values are escaped, so an unescaped "timestamp" key is the line's own.
 const TIMESTAMP = /"timestamp":"([^"]+)"/;
+// A hook attachment line opens with its attachment object; the outer "type":"attachment" only
+// comes after the content, so a line cut short inside the content is recognised by this head.
+const ATTACHMENT_HEAD = /^\{[^{]*"attachment":\{"type":"hook_/;
+// Output a hook printed waits this long for the context block it became, then is dropped.
+const PENDING_MS = 5 * 60_000;
 
 interface Pending {
   command: string;
   text: string;
+  tsMs: number;
 }
 
-export function parseTranscript(text: string, agentId: string | null = null): TranscriptData {
+// Total length of the text Claude Code recorded as sent for this line, or null if not recorded.
+function renderedLength(row: any): number | null {
+  if (!Array.isArray(row?.rendered)) return null;
+  let n = 0;
+  for (const r of row.rendered) {
+    const c = r?.content;
+    if (typeof c === "string") n += c.length;
+    else if (Array.isArray(c)) for (const part of c) if (typeof part?.text === "string") n += part.text.length;
+  }
+  return n;
+}
+
+// Spreads the wrapper text (reminder tags, the "<hook> hook additional context:" label, the
+// newlines between blocks) over the blocks of one attachment: one separator to each later
+// block, the rest to the first.
+function addWrapper(blocks: InjectedBlock[], rendered: number | null) {
+  if (rendered === null || blocks.length === 0) return;
+  const extra = rendered - blocks.reduce((sum, b) => sum + b.chars, 0);
+  if (extra <= 0) return;
+  const separators = Math.min(blocks.length - 1, extra);
+  for (let i = 1; i <= separators; i++) blocks[i]!.chars += 1;
+  blocks[0]!.chars += extra - separators;
+}
+
+// The command whose printed output this block is: exact text, or for persisted output, the
+// command whose full output starts with the whole preview. Two different commands matching
+// means the transcript cannot tell them apart, so nobody gets it.
+function takeCommand(waiting: Pending[], body: string, persisted: boolean): string | null {
+  const hits = waiting.filter((p) => p.text === body || (persisted && body.length > 0 && p.text.startsWith(body)));
+  if (hits.length === 0 || new Set(hits.map((h) => h.command)).size !== 1) return null;
+  waiting.splice(waiting.indexOf(hits[0]!), 1);
+  return hits[0]!.command;
+}
+
+export function parseTranscript(text: string, agentId: string | null = null, sessionId: string | null = null): TranscriptData {
   const data: TranscriptData = {
-    sessionId: null,
+    sessionId,
     agentId,
     cwd: null,
     gitBranch: null,
@@ -156,6 +198,8 @@ export function parseTranscript(text: string, agentId: string | null = null): Tr
   let promptId: string | null = null;
   // Context each hook command printed, waiting to be matched to the block it became.
   const pending = new Map<string, Pending[]>();
+  // Whole-file Reads of saved hook output, waiting for their tool result.
+  const pendingReads = new Map<string, string>();
 
   const lines = text.split("\n");
   // Bookkeeping lines (mode, last-prompt) carry no timestamp, so look a little further in.
@@ -175,19 +219,11 @@ export function parseTranscript(text: string, agentId: string | null = null): Tr
     const prefix = prefixEnd === -1 ? line : line.slice(0, prefixEnd);
 
     if (prefix.includes('"type":"user"')) {
-      const matched = prefix.match(PROMPT_ID)?.[1];
-      if (matched) {
-        const id: string = matched === promptId ? promptId : own(matched);
-        promptId = id;
-        if (!seenPrompts.has(id)) {
-          seenPrompts.add(id);
-          data.prompts.push({ id, tsMs: tsOf(line.match(TIMESTAMP)?.[1]) });
-        }
-      }
+      userLine(line, prefix);
       continue;
     }
 
-    if (line.includes('"type":"attachment"') && line.includes('"type":"hook_')) {
+    if (line.includes('"type":"hook_') && (line.includes('"type":"attachment"') || ATTACHMENT_HEAD.test(line.slice(0, 400)))) {
       let row: any;
       try {
         row = JSON.parse(line);
@@ -196,9 +232,7 @@ export function parseTranscript(text: string, agentId: string | null = null): Tr
         continue;
       }
       if (row?.type !== "attachment" || typeof row.attachment !== "object" || !row.attachment) continue;
-      data.sessionId ??= typeof row.sessionId === "string" ? own(row.sessionId) : null;
-      data.cwd ??= typeof row.cwd === "string" ? own(row.cwd) : null;
-      if (typeof row.gitBranch === "string" && row.gitBranch && row.gitBranch !== data.gitBranch) data.gitBranch = own(row.gitBranch);
+      lineContext(row);
       handleAttachment(row, row.attachment);
       continue;
     }
@@ -209,8 +243,10 @@ export function parseTranscript(text: string, agentId: string | null = null): Tr
         const row = JSON.parse(line);
         if (row?.type !== "assistant") continue;
         for (const part of row?.message?.content ?? []) {
-          const path = part?.type === "tool_use" && part.name === "Read" ? part.input?.file_path : null;
-          if (typeof path === "string") data.readPaths.push(own(path));
+          if (part?.type !== "tool_use" || part.name !== "Read" || typeof part.id !== "string") continue;
+          const input = part.input ?? {};
+          if (typeof input.file_path !== "string" || input.offset != null || input.limit != null) continue;
+          pendingReads.set(own(part.id), own(input.file_path));
         }
       } catch {
         data.badLines++;
@@ -220,13 +256,53 @@ export function parseTranscript(text: string, agentId: string | null = null): Tr
 
   return data;
 
+  // Session, folder and branch, from whichever line first carries them.
+  function lineContext(row: any) {
+    if (data.sessionId === null && typeof row.sessionId === "string") data.sessionId = own(row.sessionId);
+    if (data.cwd === null && typeof row.cwd === "string") data.cwd = own(row.cwd);
+    if (typeof row.gitBranch === "string" && row.gitBranch && row.gitBranch !== data.gitBranch) data.gitBranch = own(row.gitBranch);
+  }
+
+  function userLine(line: string, prefix: string) {
+    const matched = prefix.match(PROMPT_ID)?.[1];
+    if (matched && matched !== promptId) {
+      const id = own(matched);
+      promptId = id;
+      if (!seenPrompts.has(id)) {
+        seenPrompts.add(id);
+        data.prompts.push({ id, tsMs: tsOf(line.match(TIMESTAMP)?.[1]) });
+        // A session can have no hook lines at all; its first prompt still says where it ran.
+        if (data.cwd === null || data.sessionId === null) {
+          try {
+            lineContext(JSON.parse(line));
+          } catch {
+            // Not a hook line; a prompt cut short only costs the folder name.
+          }
+        }
+      }
+    }
+    if (pendingReads.size === 0 || !line.includes('"tool_result"')) return;
+    if (![...pendingReads.keys()].some((id) => line.includes(id))) return;
+    let row: any;
+    try {
+      row = JSON.parse(line);
+    } catch {
+      return;
+    }
+    for (const part of Array.isArray(row?.message?.content) ? row.message.content : []) {
+      const path = part?.type === "tool_result" ? pendingReads.get(part.tool_use_id) : undefined;
+      if (path === undefined) continue;
+      pendingReads.delete(part.tool_use_id);
+      if (part.is_error !== true) data.readPaths.push(path);
+    }
+  }
+
   function handleAttachment(row: any, a: any) {
     const type = String(a.type ?? "");
     const hookEvent = own(String(a.hookEvent ?? ""));
     const hookName = own(String(a.hookName ?? hookEvent));
     const tsMs = tsOf(row.timestamp);
-    const sessionId = data.sessionId ?? "";
-    const base = { sessionId, agentId, tsMs, promptId, hookEvent, hookName };
+    const base = { sessionId: data.sessionId ?? "", agentId, tsMs, promptId, hookEvent, hookName };
 
     if (typeof a.command === "string" && (type === "hook_success" || "durationMs" in a || "exitCode" in a)) {
       const command = own(a.command);
@@ -234,25 +310,29 @@ export function parseTranscript(text: string, agentId: string | null = null): Tr
       const ctx = typeof a.stdout === "string" ? contextFromStdout(hookEvent, a.stdout) : null;
       if (ctx) {
         const list = pending.get(hookEvent) ?? [];
-        list.push({ command, text: ctx });
+        list.push({ command, text: ctx, tsMs });
         pending.set(hookEvent, list.slice(-50));
       }
     }
 
     if (type === "hook_additional_context") {
       const parts: unknown[] = Array.isArray(a.content) ? a.content : [a.content];
-      const waiting = pending.get(hookEvent) ?? [];
+      const waiting = (pending.get(hookEvent) ?? []).filter((p) => tsMs - p.tsMs <= PENDING_MS);
+      pending.set(hookEvent, waiting);
+      const made: InjectedBlock[] = [];
       for (const part of parts) {
         if (typeof part !== "string" || !part) continue;
-        data.blocks.push(blockFrom(base, "context", part, waiting));
+        made.push(blockFrom(base, "context", part, waiting));
       }
-      pending.delete(hookEvent);
+      addWrapper(made, renderedLength(row));
+      data.blocks.push(...made);
     } else if (type === "hook_blocking_error") {
       const be = a.blockingError;
       const text = typeof be === "string" ? be : typeof be?.blockingError === "string" ? be.blockingError : null;
       if (!text) return;
       const block = blockFrom(base, "blocking_error", text, []);
       block.command = typeof be?.command === "string" ? own(be.command) : null;
+      addWrapper([block], renderedLength(row));
       data.blocks.push(block);
     }
   }
@@ -267,9 +347,6 @@ function blockFrom(
   const unwrapped = unwrapPersisted(text);
   const body = unwrapped ? unwrapped.body : text;
   const tag = leadingTag(body);
-  const head = body.slice(0, 300);
-  const match = waiting.findIndex((p) => p.text === body || (unwrapped !== null && head.length > 0 && p.text.startsWith(head)));
-  const command = match === -1 ? null : waiting.splice(match, 1)[0]!.command;
   const p = unwrapped?.persisted ?? null;
   return {
     ...base,
@@ -280,7 +357,7 @@ function blockFrom(
     signature: own(signatureOf(body, tag)),
     preview: own((p ? `[persisted ${p.reportedSize ?? "?"}] ` : "") + oneLine(body)),
     hash: hashOf(text),
-    command,
+    command: takeCommand(waiting, body, unwrapped !== null),
     persisted: p ? { reportedSize: own(p.reportedSize), path: own(p.path), readBack: false } : null,
   };
 }

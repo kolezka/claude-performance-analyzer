@@ -9,7 +9,8 @@ import { ownerText } from "./owners";
 import type { HookFiring } from "./telemetry";
 import type { HookRun, InjectedBlock } from "./transcript";
 
-export const TOKEN_NOTE = "Tokens are estimates (chars / 4). Injected text is counted as the model received it.";
+export const TOKEN_NOTE =
+  "Tokens are estimates (chars / 4). Injected text is counted as the model received it: previews for output too large for context, plus Claude Code's reminder wrapper where the transcript records it.";
 
 export const tokensOf = (chars: number) => Math.round(chars / 4);
 
@@ -50,7 +51,9 @@ export function projectName(cwd: string | null): string {
 export function scopeLine(h: Harness): string {
   const s = h.scope;
   const bad = s.sessions.reduce((sum, x) => sum + x.badLines, 0);
-  const badNote = bad ? ` Skipped ${plural(bad, "unreadable hook line")} in the transcripts; not counted.` : "";
+  let badNote = bad ? ` Skipped ${plural(bad, "unreadable hook line")} in the transcripts; not counted.` : "";
+  if (s.unreadableFolders.length)
+    badNote += ` ${plural(s.unreadableFolders.length, "transcript folder")} could not be read, so their sessions are missing (first: ${s.unreadableFolders[0]}).`;
   if (s.kind === "session") {
     const sess = s.sessions[0]!;
     const where = [projectName(sess.cwd), sess.gitBranch ? `branch ${sess.gitBranch}` : null].filter(Boolean).join(", ");

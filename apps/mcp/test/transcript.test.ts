@@ -1,6 +1,20 @@
 import { expect, test } from "bun:test";
 import { contextFromStdout, parseTranscript, signatureOf, unwrapPersisted } from "../src/transcript";
-import { CWD, modeLine, PERSISTED_PATH, persistedBlock, promptLine, readLine, REFRESH, RULES, SESSION_START_CMD, SID, sessionTranscript, T0 } from "./fixtures";
+import {
+  CWD,
+  modeLine,
+  PERSISTED_PATH,
+  persistedBlock,
+  promptLine,
+  readLine,
+  REFRESH,
+  RULES,
+  SESSION_START_CMD,
+  SID,
+  sessionTranscript,
+  T0,
+  toolResultLine,
+} from "./fixtures";
 
 test("parses injected blocks, hook runs, prompts and read-backs from a transcript", () => {
   const d = parseTranscript(sessionTranscript());
@@ -44,7 +58,7 @@ test("persisted output counts as the preview the model saw, not the full file", 
 test("assistant lines put message before type, and a Read of saved hook output is still seen", () => {
   const line = readLine(PERSISTED_PATH, T0);
   expect(line.indexOf('"message"')).toBeLessThan(line.indexOf('"type":"assistant"'));
-  expect(parseTranscript(line).readPaths).toEqual([PERSISTED_PATH]);
+  expect(parseTranscript([line, toolResultLine("p1", "t1", false, T0 + 1)].join("\n")).readPaths).toEqual([PERSISTED_PATH]);
 });
 
 test("first and last times skip bookkeeping lines that carry no timestamp", () => {

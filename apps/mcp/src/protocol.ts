@@ -34,8 +34,9 @@ export function createServer(info: ServerInfo, tools: ToolDef[]) {
   async function handle(msg: unknown): Promise<Json | null> {
     if (!msg || typeof msg !== "object" || Array.isArray(msg)) return fail(null, -32600, "Invalid request");
     const { id, method, params } = msg as Json;
-    const isNotification = id === undefined;
-    if (typeof method !== "string") return isNotification ? null : fail(id, -32600, "Invalid request");
+    // A notification never gets a reply, whatever its method. This server acts on none of them.
+    if (id === undefined) return null;
+    if (typeof method !== "string") return fail(id, -32600, "Invalid request");
 
     switch (method) {
       case "initialize": {
@@ -49,7 +50,7 @@ export function createServer(info: ServerInfo, tools: ToolDef[]) {
         });
       }
       case "ping":
-        return isNotification ? null : reply(id, {});
+        return reply(id, {});
       case "tools/list":
         return reply(id, { tools: tools.map(({ name, description, inputSchema }) => ({ name, description, inputSchema })) });
       case "tools/call": {
@@ -64,7 +65,6 @@ export function createServer(info: ServerInfo, tools: ToolDef[]) {
         }
       }
       default:
-        if (isNotification) return null;
         return fail(id, -32601, `Method not found: ${method}`);
     }
   }

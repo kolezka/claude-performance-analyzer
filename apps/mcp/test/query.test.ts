@@ -1,7 +1,11 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
-import { gather } from "../src/gather";
-import { buildQueryDb, checkSql, runQuery } from "../src/query";
+import { gather, type Harness } from "../src/gather";
+import { queryRows } from "../src/query";
+import { buildQueryDb as buildFromRows, checkSql, runQuery } from "../src/query-db";
+import { telemetryPath } from "../src/telemetry";
 import { hookFiring, SID, sessionTranscript, T0, tempEnv, writeTelemetry, writeTranscript, type TempEnv } from "./fixtures";
+
+const buildQueryDb = (h: Harness) => buildFromRows(queryRows(h), telemetryPath());
 
 let env: TempEnv;
 beforeEach(() => {

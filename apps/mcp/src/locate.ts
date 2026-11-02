@@ -2,9 +2,10 @@
 // A session's transcript lives under the project folder of its working directory, and moves
 // when the session switches directory (e.g. into a worktree), so lookups by id scan every
 // project folder instead of trusting the folder the session started in.
-import { existsSync, readdirSync, statSync } from "node:fs";
+import { readdirSync, statSync } from "node:fs";
 import { basename, join } from "node:path";
 import { claudeDir } from "@cpa/claude-settings";
+import { UserError } from "./errors";
 import { parseTranscript, type TranscriptData } from "./transcript";
 
 export interface SessionFiles {
@@ -13,27 +14,44 @@ export interface SessionFiles {
   subagents: string[];
 }
 
+export interface Found {
+  sessions: SessionFiles[];
+  // Folders that exist but could not be listed. Their sessions are missing from the answer.
+  unreadable: string[];
+}
+
 export function projectsDir(): string {
   return join(claudeDir(), "projects");
 }
 
-function listDirs(path: string): string[] {
+// The root must be readable: without it every answer would be an empty, healthy-looking zero.
+function projectFolders(): string[] {
+  const root = projectsDir();
   try {
-    return readdirSync(path, { withFileTypes: true })
+    return readdirSync(root, { withFileTypes: true })
       .filter((d) => d.isDirectory())
-      .map((d) => join(path, d.name));
-  } catch {
-    return [];
+      .map((d) => join(root, d.name));
+  } catch (err) {
+    throw new UserError(`Cannot read transcripts at ${root}: ${(err as Error).message}`);
   }
 }
 
-function listFiles(path: string, suffix: string): string[] {
+interface Listing {
+  files: string[];
+  dirs: string[];
+}
+
+function list(path: string, unreadable: string[] | null): Listing {
   try {
-    return readdirSync(path)
-      .filter((n) => n.endsWith(suffix))
-      .map((n) => join(path, n));
-  } catch {
-    return [];
+    const entries = readdirSync(path, { withFileTypes: true });
+    return {
+      files: entries.filter((e) => e.isFile() && e.name.endsWith(".jsonl")).map((e) => join(path, e.name)),
+      dirs: entries.filter((e) => e.isDirectory()).map((e) => join(path, e.name)),
+    };
+  } catch (err) {
+    // A missing subagents folder is normal; anything else is a gap the answer must mention.
+    if (unreadable && (err as NodeJS.ErrnoException).code !== "ENOENT") unreadable.push(path);
+    return { files: [], dirs: [] };
   }
 }
 
@@ -45,46 +63,47 @@ function mtimeMs(path: string): number {
   }
 }
 
-function subagentFiles(projectDir: string, sessionId: string): string[] {
-  return listFiles(join(projectDir, sessionId, "subagents"), ".jsonl");
+function subagentFiles(projectDir: string, sessionId: string, unreadable: string[]): string[] {
+  return list(join(projectDir, sessionId, "subagents"), unreadable).files;
 }
 
 // Exact id, or a unique prefix of at least 8 characters.
-export function findSession(idOrPrefix: string): SessionFiles[] {
+export function findSession(idOrPrefix: string): Found {
   const found = new Map<string, SessionFiles>();
-  for (const dir of listDirs(projectsDir())) {
-    for (const file of listFiles(dir, ".jsonl")) {
+  const unreadable: string[] = [];
+  for (const dir of projectFolders()) {
+    for (const file of list(dir, unreadable).files) {
       const id = basename(file, ".jsonl");
       if (id !== idOrPrefix && !(idOrPrefix.length >= 8 && id.startsWith(idOrPrefix))) continue;
       const entry = found.get(id) ?? { sessionId: id, main: null, subagents: [] };
       entry.main ??= file;
-      entry.subagents.push(...subagentFiles(dir, id));
+      entry.subagents.push(...subagentFiles(dir, id, unreadable));
       found.set(id, entry);
     }
   }
-  return [...found.values()];
+  return { sessions: [...found.values()], unreadable };
 }
 
 // Sessions whose main transcript or any subagent transcript changed since `sinceMs`.
-export function recentSessions(sinceMs: number): SessionFiles[] {
+export function recentSessions(sinceMs: number): Found {
   const found = new Map<string, SessionFiles>();
-  for (const dir of listDirs(projectsDir())) {
-    const ids = new Set<string>();
-    for (const file of listFiles(dir, ".jsonl")) ids.add(basename(file, ".jsonl"));
-    for (const sub of listDirs(dir)) ids.add(basename(sub));
+  const unreadable: string[] = [];
+  for (const dir of projectFolders()) {
+    const listing = list(dir, unreadable);
+    const mains = new Map(listing.files.map((f) => [basename(f, ".jsonl"), f]));
+    const ids = new Set([...mains.keys(), ...listing.dirs.map((d) => basename(d))]);
     for (const id of ids) {
-      const main = join(dir, `${id}.jsonl`);
-      const subs = subagentFiles(dir, id);
-      const hasMain = existsSync(main);
-      const touched = (hasMain && mtimeMs(main) >= sinceMs) || subs.some((s) => mtimeMs(s) >= sinceMs);
+      const main = mains.get(id) ?? null;
+      const subs = subagentFiles(dir, id, unreadable);
+      const touched = (main !== null && mtimeMs(main) >= sinceMs) || subs.some((s) => mtimeMs(s) >= sinceMs);
       if (!touched) continue;
       const entry = found.get(id) ?? { sessionId: id, main: null, subagents: [] };
-      if (hasMain) entry.main ??= main;
+      entry.main ??= main;
       entry.subagents.push(...subs);
       found.set(id, entry);
     }
   }
-  return [...found.values()];
+  return { sessions: [...found.values()], unreadable };
 }
 
 const cache = new Map<string, { size: number; mtimeMs: number; data: TranscriptData }>();
@@ -94,11 +113,11 @@ const CACHE_MAX = 2000;
 const GC_EVERY_BYTES = 64 * 1024 * 1024;
 let bytesSinceGc = 0;
 
-export async function readTranscript(path: string, agentId: string | null = null): Promise<TranscriptData> {
+export async function readTranscript(path: string, agentId: string | null, sessionId: string): Promise<TranscriptData> {
   const st = statSync(path);
   const hit = cache.get(path);
   if (hit && hit.size === st.size && hit.mtimeMs === st.mtimeMs) return hit.data;
-  const data = parseTranscript(await Bun.file(path).text(), agentId);
+  const data = parseTranscript(await Bun.file(path).text(), agentId, sessionId);
   bytesSinceGc += st.size;
   if (bytesSinceGc >= GC_EVERY_BYTES) {
     bytesSinceGc = 0;
@@ -123,10 +142,10 @@ export interface SessionData {
 }
 
 export async function loadSession(files: SessionFiles): Promise<SessionData> {
-  const main = files.main ? await readTranscript(files.main) : null;
+  const main = files.main ? await readTranscript(files.main, null, files.sessionId) : null;
   const subagents: TranscriptData[] = [];
   for (const path of files.subagents) {
-    subagents.push(await readTranscript(path, basename(path, ".jsonl").replace(/^agent-/, "")));
+    subagents.push(await readTranscript(path, basename(path, ".jsonl").replace(/^agent-/, ""), files.sessionId));
   }
   const all = [main, ...subagents].filter((d): d is TranscriptData => d !== null);
   const firsts = all.map((d) => d.firstMs).filter((v): v is number => v !== null);

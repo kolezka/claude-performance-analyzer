@@ -1,12 +1,13 @@
 // Resolves a tool call's scope (which sessions, since when) and gathers everything the reports
 // need: injected blocks and hook runs from transcripts, hook firings from telemetry, owners.
 import { promptBreakdowns } from "@cpa/analytics";
+import { UserError } from "./errors";
 import { findSession, loadSession, recentSessions, type SessionData } from "./locate";
 import { buildOwnerIndex, type OwnerIndex } from "./owners";
 import { hookFirings, hookRegistrations, openTelemetry, sessionEvents, type HookFiring } from "./telemetry";
 import type { HookRun, InjectedBlock } from "./transcript";
 
-export class UserError extends Error {}
+export { UserError };
 
 export interface ScopeArgs {
   session?: string;
@@ -21,6 +22,8 @@ export interface Scope {
   sinceMs: number;
   sinceLabel: string | null;
   project: string | null;
+  // Project folders under ~/.claude/projects that could not be listed; their sessions are missing.
+  unreadableFolders: string[];
 }
 
 export interface Harness {
@@ -54,14 +57,14 @@ export async function resolveScope(args: ScopeArgs, env: Record<string, string |
   if (session === "all") {
     const label = sinceLabel ?? "24h";
     const sinceMs = nowMs - parseSince(label);
-    const files = recentSessions(sinceMs);
+    const found = recentSessions(sinceMs);
     const sessions: SessionData[] = [];
-    for (const f of files) {
+    for (const f of found.sessions) {
       const s = await loadSession(f);
       if (project && !(s.cwd ?? "").toLowerCase().includes(project.toLowerCase())) continue;
       sessions.push(s);
     }
-    return { kind: "all", sessions, sinceMs, sinceLabel: label, project };
+    return { kind: "all", sessions, sinceMs, sinceLabel: label, project, unreadableFolders: found.unreadable };
   }
 
   let id = session;
@@ -74,10 +77,12 @@ export async function resolveScope(args: ScopeArgs, env: Record<string, string |
     id = envId;
   }
   const found = findSession(id);
-  if (found.length === 0) throw new UserError(`No transcript found for session ${id} under ~/.claude/projects.`);
-  if (found.length > 1) throw new UserError(`Session prefix ${id} matches ${found.length} sessions: ${found.map((f) => f.sessionId).join(", ")}`);
+  const unreadable = found.unreadable.length ? ` ${found.unreadable.length} project folders could not be read.` : "";
+  if (found.sessions.length === 0) throw new UserError(`No transcript found for session ${id} under ~/.claude/projects.${unreadable}`);
+  if (found.sessions.length > 1)
+    throw new UserError(`Session prefix ${id} matches ${found.sessions.length} sessions: ${found.sessions.map((f) => f.sessionId).join(", ")}`);
   const sinceMs = sinceLabel ? nowMs - parseSince(sinceLabel) : 0;
-  return { kind: "session", sessions: [await loadSession(found[0]!)], sinceMs, sinceLabel, project: null };
+  return { kind: "session", sessions: [await loadSession(found.sessions[0]!)], sinceMs, sinceLabel, project: null, unreadableFolders: found.unreadable };
 }
 
 export async function gather(args: ScopeArgs, env: Record<string, string | undefined> = process.env, nowMs = Date.now()): Promise<Harness> {
@@ -115,7 +120,9 @@ export async function gather(args: ScopeArgs, env: Record<string, string | undef
       const cwdBySession = new Map(scope.sessions.map((s) => [s.sessionId, s.cwd]));
       const events = [...blocks.map((b) => b.hookEvent), ...runs.map((r) => r.hookEvent)];
       owners = buildOwnerIndex(regs, cwdBySession, events);
-      if (scope.kind === "session") {
+      // A since window cuts turns in half, so a share of active turn time would mix hook time
+      // from before the window into the answer. Whole sessions only.
+      if (scope.kind === "session" && scope.sinceMs === 0) {
         const turns = [...promptBreakdowns(sessionEvents(tel.db, sessionIds)).values()].filter((p) => p.endMs >= scope.sinceMs);
         activeMs = turns.reduce((sum, p) => sum + p.activeMs, 0);
         turnHookMs = turns.reduce((sum, p) => sum + p.hookMs, 0);

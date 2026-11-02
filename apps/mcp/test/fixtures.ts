@@ -30,7 +30,7 @@ export function promptLine(promptId: string, text: string, tsMs: number): string
   });
 }
 
-export function attachmentLine(attachment: Record<string, unknown>, tsMs: number, sessionId = SID): string {
+export function attachmentLine(attachment: Record<string, unknown>, tsMs: number, sessionId = SID, rendered?: string): string {
   return JSON.stringify({
     parentUuid: null,
     isSidechain: false,
@@ -41,7 +41,14 @@ export function attachmentLine(attachment: Record<string, unknown>, tsMs: number
     sessionId,
     cwd: CWD,
     gitBranch: "main",
+    ...(rendered === undefined ? {} : { rendered: [{ content: rendered }], renderedRole: "user" }),
   });
+}
+
+// The text Claude Code actually sends for a context attachment: a system reminder naming the
+// hook, with the blocks joined by newlines.
+export function renderedContext(hookName: string, content: string[]): string {
+  return `<system-reminder>\n${hookName} hook additional context: ${content.join("\n")}\n</system-reminder>`;
 }
 
 export function hookSuccess(hookEvent: string, command: string, stdout: string, durationMs: number, tsMs: number): string {
@@ -55,13 +62,26 @@ export function hookContext(hookEvent: string, content: string[], tsMs: number, 
   return attachmentLine({ type: "hook_additional_context", hookName, hookEvent, content }, tsMs);
 }
 
-export function readLine(path: string, tsMs: number): string {
+export function readLine(path: string, tsMs: number, toolUseId = "t1", extraInput: Record<string, unknown> = {}): string {
   return JSON.stringify({
     parentUuid: null,
     isSidechain: false,
-    message: { role: "assistant", content: [{ type: "tool_use", id: "t1", name: "Read", input: { file_path: path } }] },
+    message: { role: "assistant", content: [{ type: "tool_use", id: toolUseId, name: "Read", input: { file_path: path, ...extraInput } }] },
     type: "assistant",
     uuid: `r-${tsMs}`,
+    timestamp: iso(tsMs),
+    sessionId: SID,
+  });
+}
+
+export function toolResultLine(promptId: string, toolUseId: string, isError: boolean, tsMs: number): string {
+  return JSON.stringify({
+    parentUuid: null,
+    isSidechain: false,
+    promptId,
+    type: "user",
+    message: { role: "user", content: [{ type: "tool_result", tool_use_id: toolUseId, content: isError ? "File does not exist." : "1\tfile text", is_error: isError }] },
+    uuid: `tr-${tsMs}`,
     timestamp: iso(tsMs),
     sessionId: SID,
   });
@@ -88,6 +108,7 @@ export function sessionTranscript(): string {
     promptLine("p1", "first prompt", T0 + 1_000),
     hookContext("UserPromptSubmit", [persistedBlock("12.8KB", PERSISTED_PATH, "<hindsight_memory>\nrecalled fact\n</hindsight_memory>"), REFRESH], T0 + 1_100),
     readLine(PERSISTED_PATH, T0 + 2_000),
+    toolResultLine("p1", "t1", false, T0 + 2_100),
     attachmentLine({ type: "hook_blocking_error", hookName: "Stop", hookEvent: "Stop", blockingError: { blockingError: "Run the checks first.", command: "sh stop-guard.sh" } }, T0 + 3_000),
     promptLine("p2", "second prompt", T0 + 60_000),
     hookContext("UserPromptSubmit", [REFRESH], T0 + 60_100),

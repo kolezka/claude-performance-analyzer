@@ -2,7 +2,7 @@
 // each part; the agent decides what to change.
 import { gather, UserError, type ScopeArgs } from "./gather";
 import type { ToolDef } from "./protocol";
-import { buildQueryDb, QUERY_SCHEMA, runQuery } from "./query";
+import { QUERY_SCHEMA, runIsolatedQuery } from "./query";
 import { hookTimeReport, injectionReport, memoryReport, summaryReport, type GroupBy } from "./report";
 
 const SCOPE_PROPS = {
@@ -71,7 +71,7 @@ export function harnessTools(env: Record<string, string | undefined> = process.e
     },
     {
       name: "harness_query",
-      description: `Read-only SQL (SQLite, one SELECT) for questions the other tools do not answer. Max 100 rows.\n${QUERY_SCHEMA}`,
+      description: `Read-only SQL (SQLite, one SELECT) for questions the other tools do not answer. Max 100 rows; stopped after 10s.\n${QUERY_SCHEMA}`,
       inputSchema: {
         type: "object",
         properties: { sql: { type: "string", description: "One SELECT or WITH query." }, ...SCOPE_PROPS },
@@ -80,12 +80,7 @@ export function harnessTools(env: Record<string, string | undefined> = process.e
       },
       run: async (args) => {
         if (typeof args.sql !== "string" || !args.sql.trim()) throw new UserError("sql is required");
-        const db = buildQueryDb(await gather(scopeArgs(args), env));
-        try {
-          return runQuery(db, args.sql);
-        } finally {
-          db.close();
-        }
+        return runIsolatedQuery(await gather(scopeArgs(args), env), args.sql);
       },
     },
   ];
