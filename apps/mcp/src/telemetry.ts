@@ -1,5 +1,5 @@
 // Read-only access to the collector's SQLite store, for hook timing and hook registrations.
-// Opened with mode=ro so nothing here can write to the file the collector owns.
+// Opened read-only so nothing here can write to the file the collector owns.
 import { Database } from "bun:sqlite";
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
@@ -15,7 +15,8 @@ export type Telemetry = { ok: true; db: Database; path: string } | { ok: false; 
 export function openTelemetry(path = telemetryPath()): Telemetry {
   if (!existsSync(path)) return { ok: false, path, reason: `no telemetry database at ${path} (is the collector installed and Claude Code telemetry on?)` };
   try {
-    const db = new Database(`file:${path}?mode=ro`, { readonly: true });
+    // A plain path, not a "file:" URI: Bun's SQLite on Linux reads a URI as a file name.
+    const db = new Database(path, { readonly: true });
     db.query("SELECT 1 FROM events LIMIT 1").get();
     return { ok: true, db, path };
   } catch (err) {
