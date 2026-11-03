@@ -12,11 +12,23 @@ export interface Host {
   lastSeenMs: number | null;
 }
 
+// An address of this Mac that a remote host can send to.
+export interface HostAddress {
+  network: "tailscale" | "lan";
+  interface: string;
+  address: string;
+}
+
+export interface HostEndpoint extends HostAddress {
+  url: string;
+}
+
 export interface HostCredentials {
   host: Host;
   token: string;
+  // Points at endpoints[0], or at a placeholder when there are none.
   env: Record<string, string>;
-  tailscaleAddress: string | null;
+  endpoints: HostEndpoint[];
 }
 
 export interface HostContext {

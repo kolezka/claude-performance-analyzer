@@ -13,17 +13,31 @@ struct TelemetryHost: Decodable, Identifiable, Equatable {
     var isLocal: Bool { id == Self.localId }
 }
 
+struct HostEndpoint: Decodable, Hashable {
+    let network: String
+    let interface: String
+    let address: String
+    let url: String
+
+    var isLAN: Bool { network == "lan" }
+    var label: String { "\(isLAN ? "LAN" : "Tailscale") \(address) (\(interface))" }
+}
+
 // Returned once by add-host and regenerate-token. Held only by the view that shows it,
 // never written to preferences or logged.
 struct HostCredentials: Decodable {
     let host: TelemetryHost
     let token: String
+    // Points at endpoints[0], or at a placeholder when endpoints is empty.
     let env: [String: String]
-    // nil when the collector found no Tailscale address and put a placeholder in the endpoint.
-    let tailscaleAddress: String?
+    // This Mac's addresses a remote host can send to. Empty when the collector found none;
+    // nil from an older collector that does not list them.
+    let endpoints: [HostEndpoint]?
 
     // The block to paste into the remote machine's Claude Code settings.json.
-    var envBlock: String {
+    func envBlock(using endpoint: HostEndpoint? = nil) -> String {
+        var env = env
+        if let endpoint { env["OTEL_EXPORTER_OTLP_ENDPOINT"] = endpoint.url }
         let data = try? JSONSerialization.data(
             withJSONObject: ["env": env],
             options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]

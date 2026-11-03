@@ -63,6 +63,7 @@ test.skipIf(process.platform !== "darwin")(
         "local requests say host=local",
         "management writes send JSON, Origin and encoded ids",
         "origin keeps a non-default port and drops the path",
+        "env block follows the chosen endpoint",
         "credentials decode, refresh the list and never persist",
         "management errors surface the collector message",
         "selection persists across launches",

@@ -16,7 +16,7 @@ test("classifyPeer: Tailscale v4 range boundaries", () => {
   for (const a of ["100.64.0.0", "100.64.0.1", "100.100.100.100", "100.127.255.255", "::ffff:100.64.0.1", "::ffff:6440:1"]) {
     expect([a, classifyPeer(a)]).toEqual([a, "tailscale"]);
   }
-  for (const a of ["100.63.255.255", "100.128.0.0", "100.0.0.1", "10.0.0.1", "192.168.1.10", "::ffff:100.128.0.1"]) {
+  for (const a of ["100.63.255.255", "100.128.0.0", "100.0.0.1", "::ffff:100.128.0.1"]) {
     expect([a, classifyPeer(a)]).toEqual([a, "other"]);
   }
 });
@@ -25,10 +25,27 @@ test("classifyPeer: Tailscale v6 in compressed and expanded form", () => {
   for (const a of ["fd7a:115c:a1e0::1", "fd7a:115c:a1e0:ab12:4843:cd96:6258:b240", "FD7A:115C:A1E0::abcd", "fd7a:115c:a1e0:0:0:0:0:1", "fd7a:115c:a1e0:ffff:ffff:ffff:ffff:ffff"]) {
     expect([a, classifyPeer(a)]).toEqual([a, "tailscale"]);
   }
-  // A textual prefix match would wrongly accept the first two.
-  for (const a of ["fd7a:115c:a1e01::1", "fd7a:115c:a1e:0::1", "fd7a:115c:a1e1::1", "fd7a:115c::1", "fe80::1", "2001:db8::1", "::"]) {
+  // A textual prefix match would wrongly call these Tailscale. They are plain ULA addresses.
+  for (const a of ["fd7a:115c:a1e:0::1", "fd7a:115c:a1e1::1", "fd7a:115c::1"]) {
+    expect([a, classifyPeer(a)]).toEqual([a, "lan"]);
+  }
+  for (const a of ["fd7a:115c:a1e01::1", "2001:db8::1", "::"]) {
     expect([a, classifyPeer(a)]).toEqual([a, "other"]);
   }
+});
+
+test("classifyPeer: private and link-local LAN ranges with their boundaries", () => {
+  const lan = [
+    "10.0.0.0", "10.255.255.255", "172.16.0.0", "172.31.255.255", "192.168.0.0", "192.168.50.5", "192.168.255.255",
+    "169.254.0.1", "169.254.255.254", "::ffff:192.168.50.5", "::ffff:c0a8:3205", "::ffff:10.1.2.3",
+    "fc00::1", "fd00::1", "fdff:ffff::1", "fe80::1", "febf:ffff::1", "fe80::1c2b:3cff:fe4d:5e6f%en0",
+  ];
+  for (const a of lan) expect([a, classifyPeer(a)]).toEqual([a, "lan"]);
+  const outside = [
+    "9.255.255.255", "11.0.0.0", "172.15.255.255", "172.32.0.0", "192.167.255.255", "192.169.0.0", "169.253.255.255", "169.255.0.0",
+    "8.8.8.8", "::ffff:8.8.8.8", "fbff:ffff::1", "fe00::1", "fec0::1", "2001:db8::1", "fe80::1%", "192.168.1.1%en0",
+  ];
+  for (const a of outside) expect([a, classifyPeer(a)]).toEqual([a, "other"]);
 });
 
 test("classifyPeer: malformed, empty and null addresses are other", () => {
@@ -70,9 +87,18 @@ test("Tailscale peers need a valid token", () => {
   expect(status(authorizeIngest("100.64.0.9", token, store))).toBe(401);
 });
 
-test("peers outside Tailscale get 403 even with a valid token, and a missing address fails closed", async () => {
+test("LAN peers need a valid token", () => {
+  const { store, token, host } = setup();
+  for (const a of ["192.168.50.5", "10.0.0.7", "::ffff:172.20.1.1", "fd00::5", "fe80::5%en0"]) {
+    expect([a, authorizeIngest(a, `Bearer ${token}`, store)]).toEqual([a, { hostId: host.id }]);
+    expect([a, status(authorizeIngest(a, null, store))]).toEqual([a, 401]);
+    expect([a, status(authorizeIngest(a, `Bearer ${token}x`, store))]).toEqual([a, 401]);
+  }
+});
+
+test("public peers get 403 even with a valid token, and a missing address fails closed", async () => {
   const { store, token } = setup();
-  for (const a of ["192.168.1.5", "8.8.8.8", "fe80::1", null]) {
+  for (const a of ["8.8.8.8", "172.32.0.1", "100.128.0.1", "2001:db8::1", "::ffff:8.8.8.8", null]) {
     const r = authorizeIngest(a, `Bearer ${token}`, store);
     expect([a, status(r)]).toEqual([a, 403]);
     expect(JSON.stringify(await (r as Response).json())).not.toContain(token);

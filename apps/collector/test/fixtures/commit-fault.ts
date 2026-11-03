@@ -55,7 +55,7 @@ async function run({ action, fault, restoreFails }: Scenario) {
       rebinds.push(wide);
     },
     publish: () => {},
-    tailscaleAddress: () => null,
+    addresses: () => [],
     onFatal: (message) => fatal.push(message),
   });
   listener = createListener({ port, fetch: handler });

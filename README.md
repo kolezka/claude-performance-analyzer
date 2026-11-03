@@ -33,7 +33,7 @@ A slow Claude Code turn can come from many places: the model, a long Bash call, 
 - **Details on click.** Any tool, hook or subagent opens a card with p50, p95, failures, a split by repository and recent calls.
 - **A full dashboard** in your browser: turn waterfall, recent prompts, skills, subagents, models, permission decisions, MCP connect times, errors and compaction.
 - **An MCP server for your agent.** Claude can check what its own setup costs and help you trim it. [See below](#let-your-agent-check-its-setup-mcp).
-- **Your other machines too.** Linux and macOS machines on your tailnet can send their telemetry to this Mac.
+- **Your other machines too.** Linux and macOS machines on your tailnet or your LAN can send their telemetry to this Mac.
 - **Private.** Everything stays on your Mac, in a local database kept for 14 days.
 
 ## Get started
@@ -109,17 +109,17 @@ The server only reads. It never changes your settings or hooks, and it covers se
 
 ## Your other machines
 
-Claude Code on another Linux or macOS machine can send its telemetry to this Mac over [Tailscale](https://tailscale.com). Nothing extra runs on the other machine.
+Claude Code on another Linux or macOS machine can send its telemetry to this Mac over [Tailscale](https://tailscale.com) or your LAN. Nothing extra runs on the other machine.
 
 1. In the app, open Settings > Hosts and add a host.
-2. Copy the `env` block it shows. It is shown only once.
+2. Pick which of this Mac's addresses it should send to (Tailscale or LAN), then copy the `env` block it shows. It is shown only once.
 3. Paste it into `~/.claude/settings.json` on the other machine and start a new Claude Code session there.
 
 Pick the host in the panel or the dashboard to see its numbers. Security and limits: [docs/remote-hosts.md](docs/remote-hosts.md).
 
 ## Privacy
 
-- The collector listens on `127.0.0.1` only. It opens to your tailnet only after you add a remote host, and then accepts telemetry only from Tailscale addresses with a valid token.
+- The collector listens on `127.0.0.1` only. It opens up only after you add a remote host, and then accepts telemetry only from Tailscale or private LAN addresses with a valid token. Over the LAN that traffic is not encrypted.
 - Data lives in `~/.claude-telemetry/telemetry.sqlite` on your Mac and is deleted after 14 days.
 - Without remote hosts, nothing leaves your Mac.
 

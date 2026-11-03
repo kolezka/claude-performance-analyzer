@@ -5,13 +5,19 @@ import { join } from "node:path";
 import { requestType } from "@cpa/otlp";
 import { proxyAssets, startDashboardServer } from "../src/assets";
 import { openStore } from "../src/db";
-import { createHandler, type PeerServer } from "../src/http";
+import { type HostAddress, type HostCredentials } from "../src/hosts";
+import { createHandler, findHostAddresses, type PeerServer } from "../src/http";
 import { ListenerError } from "../src/listener";
 import { otlpJson, otlpProtobuf } from "./server";
 
 const PORT = 4318;
 const ORIGIN = `http://127.0.0.1:${PORT}`;
 const TAILNET = "100.88.1.2";
+const LAN = "192.168.50.5";
+const ADDRESSES: HostAddress[] = [
+  { network: "tailscale", interface: "utun4", address: "100.101.102.103" },
+  { network: "lan", interface: "en0", address: "192.168.50.223" },
+];
 const SIGNALS = ["logs", "traces", "metrics"] as const;
 const TABLE = { logs: "events", traces: "spans", metrics: "metrics" } as const;
 
@@ -38,7 +44,7 @@ function harness(options: { assets?: (req: Request) => Response | Promise<Respon
     },
     publish: (m) => published.push(JSON.parse(m)),
     now: () => Date.now() + offsetMs,
-    tailscaleAddress: () => "100.101.102.103",
+    addresses: () => ADDRESSES,
   });
   async function call(path: string, o: CallOptions = {}) {
     const headers = { host: `127.0.0.1:${PORT}`, ...o.headers };
@@ -60,7 +66,7 @@ function harness(options: { assets?: (req: Request) => Response | Promise<Respon
 async function addHost(h: ReturnType<typeof harness>, name = "linux-box") {
   const { res } = await h.write("/api/hosts", "POST", { name });
   expect(res!.status).toBe(201);
-  return (await res!.json()) as { host: { id: string; name: string; createdMs: number | null; lastSeenMs: number | null }; token: string; env: Record<string, string>; tailscaleAddress: string | null };
+  return (await res!.json()) as HostCredentials;
 }
 
 function ingestRequest(signal: (typeof SIGNALS)[number], encoding: "json" | "protobuf", sessionId: string, marker: string): { headers: Record<string, string>; body: BodyInit } {
@@ -83,14 +89,19 @@ describe("remote ingest", () => {
         };
         expect(await send(TAILNET, null, "missing")).toBe(401);
         expect(await send(TAILNET, "Bearer cpa_wrong", "wrong")).toBe(401);
-        expect(await send("192.168.1.20", `Bearer ${token}`, "outside")).toBe(403);
+        expect(await send("8.8.8.8", `Bearer ${token}`, "outside")).toBe(403);
+        expect(await send(LAN, null, "lan-missing")).toBe(401);
+        expect(await send(LAN, "Bearer cpa_wrong", "lan-wrong")).toBe(401);
         expect(await send(TAILNET, `Bearer ${token}`, "valid-remote")).toBe(200);
         expect(await send("fd7a:115c:a1e0::42", `Bearer ${token}`, "valid-remote-v6")).toBe(200);
+        expect(await send(LAN, `Bearer ${token}`, "valid-lan")).toBe(200);
         expect(await send("127.0.0.1", null, "local")).toBe(200);
         expect(await send("::1", `Bearer ${token}`, "loopback-with-token")).toBe(200);
         expect(await send("127.0.0.1", "Bearer cpa_wrong", "loopback-bad-token")).toBe(401);
+        const lanRows = h.rows(TABLE[signal]).filter((r) => JSON.parse(r.attrs).marker === "valid-lan");
+        expect(lanRows.map((r) => r.host_id)).toEqual([host.id]);
 
-        const rotated = (await (await h.write(`/api/hosts/${host.id}/token`, "POST")).res!.json()) as { token: string };
+        const rotated =(await (await h.write(`/api/hosts/${host.id}/token`, "POST")).res!.json()) as { token: string };
         expect(await send(TAILNET, `Bearer ${token}`, "old-token")).toBe(401);
         expect(await send(TAILNET, `Bearer ${rotated.token}`, "rotated")).toBe(200);
         expect((await h.write(`/api/hosts/${host.id}`, "DELETE")).res!.status).toBe(204);
@@ -292,7 +303,11 @@ describe("host management", () => {
     const created = await addHost(h, "  build box  ");
     expect(created.host).toEqual({ id: expect.stringMatching(/^[0-9a-f-]{36}$/), name: "build box", createdMs: expect.any(Number), lastSeenMs: null });
     expect(created.token).toMatch(/^cpa_[A-Za-z0-9_-]{43}$/);
-    expect(created.tailscaleAddress).toBe("100.101.102.103");
+    // Every address this Mac can be reached at, Tailscale first; the env block uses the first.
+    expect(created.endpoints).toEqual([
+      { network: "tailscale", interface: "utun4", address: "100.101.102.103", url: `http://100.101.102.103:${PORT}` },
+      { network: "lan", interface: "en0", address: "192.168.50.223", url: `http://192.168.50.223:${PORT}` },
+    ]);
     expect(created.env.OTEL_EXPORTER_OTLP_ENDPOINT).toBe(`http://100.101.102.103:${PORT}`);
     expect(created.env.OTEL_EXPORTER_OTLP_HEADERS).toBe(`Authorization=Bearer ${created.token}`);
     expect(created.env.OTEL_EXPORTER_OTLP_PROTOCOL).toBe("http/json");
@@ -313,13 +328,14 @@ describe("host management", () => {
     expect(regenBody.host).toEqual(created.host);
     expect(regenBody.token).not.toBe(created.token);
     expect(regenBody.env.OTEL_EXPORTER_OTLP_HEADERS).toBe(`Authorization=Bearer ${regenBody.token}`);
+    expect(regenBody.endpoints).toEqual(created.endpoints);
 
-    const del = (await h.write(`/api/hosts/${second.host.id}`, "DELETE")).res!;
+    const del =(await h.write(`/api/hosts/${second.host.id}`, "DELETE")).res!;
     expect(del.status).toBe(204);
     expect((await (await h.call("/api/hosts")).res!.json()).map((x: any) => x.name)).toEqual(["This Mac", "build box"]);
   });
 
-  test("missing Tailscale address yields a placeholder endpoint and null address", async () => {
+  const addWith = async (addresses: HostAddress[]) => {
     const dir = mkdtempSync(join(tmpdir(), "cc-remote-http-"));
     const handler = createHandler({
       store: openStore(join(dir, "t.sqlite")),
@@ -327,13 +343,40 @@ describe("host management", () => {
       assets: () => new Response(""),
       rebind: () => {},
       publish: () => {},
-      tailscaleAddress: () => null,
+      addresses: () => addresses,
     });
     const req = new Request(`${ORIGIN}/api/hosts`, { method: "POST", headers: { host: `127.0.0.1:${PORT}`, origin: ORIGIN, "content-type": "application/json" }, body: JSON.stringify({ name: "x" }) });
     const res = (await handler(req, { requestIP: () => ({ address: "127.0.0.1" }), upgrade: () => false }))!;
-    const body = await res.json();
-    expect(body.tailscaleAddress).toBeNull();
-    expect(body.env.OTEL_EXPORTER_OTLP_ENDPOINT).toBe(`http://<THIS_MAC_TAILSCALE_IP>:${PORT}`);
+    return (await res.json()) as HostCredentials;
+  };
+
+  test("no reachable address yields a placeholder endpoint and no endpoints", async () => {
+    const body = await addWith([]);
+    expect(body.endpoints).toEqual([]);
+    expect(body.env.OTEL_EXPORTER_OTLP_ENDPOINT).toBe(`http://<THIS_MAC_IP>:${PORT}`);
+  });
+
+  test("a LAN-only Mac puts its LAN address in the env block", async () => {
+    const body = await addWith([{ network: "lan", interface: "en0", address: "192.168.50.223" }]);
+    expect(body.endpoints.map((e) => e.url)).toEqual([`http://192.168.50.223:${PORT}`]);
+    expect(body.env.OTEL_EXPORTER_OTLP_ENDPOINT).toBe(`http://192.168.50.223:${PORT}`);
+  });
+
+  test("address discovery lists Tailscale then private LAN IPv4, skipping loopback, link-local, public and IPv6", () => {
+    const nic = (address: string, family: "IPv4" | "IPv6" = "IPv4", internal = false) => ({ address, family, internal, netmask: "", mac: "", cidr: null }) as any;
+    const found = findHostAddresses({
+      lo0: [nic("127.0.0.1", "IPv4", true), nic("::1", "IPv6", true)],
+      en0: [nic("fe80::1c2b:3cff:fe4d:5e6f", "IPv6"), nic("192.168.50.223")],
+      en5: [nic("169.254.10.1"), nic("8.8.4.4")],
+      bridge100: [nic("10.211.55.2")],
+      utun4: [nic("100.126.2.33"), nic("fd7a:115c:a1e0::1", "IPv6")],
+      utun9: [nic("fd00::5", "IPv6")],
+    });
+    expect(found).toEqual([
+      { network: "tailscale", interface: "utun4", address: "100.126.2.33" },
+      { network: "lan", interface: "en0", address: "192.168.50.223" },
+      { network: "lan", interface: "bridge100", address: "10.211.55.2" },
+    ]);
   });
 
   test("invalid and duplicate names", async () => {

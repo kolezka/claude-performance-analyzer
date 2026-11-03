@@ -60,8 +60,12 @@ const creds: HostCredentials = {
   host: remote,
   token: "cpa_secret",
   env: { OTEL_EXPORTER_OTLP_ENDPOINT: "http://100.64.0.1:4318", OTEL_EXPORTER_OTLP_HEADERS: "Authorization=Bearer cpa_secret" },
-  tailscaleAddress: "100.64.0.1",
+  endpoints: [
+    { network: "tailscale", interface: "utun4", address: "100.64.0.1", url: "http://100.64.0.1:4318" },
+    { network: "lan", interface: "en0", address: "192.168.50.223", url: "http://192.168.50.223:4318" },
+  ],
 };
+const lan = creds.endpoints[1]!;
 
 describe("host in the URL", () => {
   test("missing or empty host param means local", () => {
@@ -299,6 +303,13 @@ describe("reveal", () => {
     expect(envText(creds)).toBe(JSON.stringify({ env: creds.env }, null, 2));
   });
 
+  test("a chosen endpoint replaces only the endpoint in the env block", () => {
+    const parsed = JSON.parse(envText(creds, lan)) as { env: Record<string, string> };
+    expect(parsed.env).toEqual({ ...creds.env, OTEL_EXPORTER_OTLP_ENDPOINT: "http://192.168.50.223:4318" });
+    expect(creds.env.OTEL_EXPORTER_OTLP_ENDPOINT).toBe("http://100.64.0.1:4318");
+    expect(envText(creds, null)).toBe(envText(creds));
+  });
+
   test("copy writes the env block", async () => {
     let written = "";
     const r = await copyEnv(creds, async (t) => {
@@ -306,6 +317,18 @@ describe("reveal", () => {
     });
     expect(r).toEqual({ ok: true });
     expect(written).toBe(envText(creds));
+  });
+
+  test("copy writes the env block for the chosen endpoint", async () => {
+    let written = "";
+    await copyEnv(
+      creds,
+      async (t) => {
+        written = t;
+      },
+      lan,
+    );
+    expect(JSON.parse(written).env.OTEL_EXPORTER_OTLP_ENDPOINT).toBe("http://192.168.50.223:4318");
   });
 
   test("copy failure returns the error instead of throwing", async () => {

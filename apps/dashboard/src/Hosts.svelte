@@ -1,5 +1,5 @@
 <script lang="ts">
-  // Remote machines that send telemetry here over Tailscale. Tokens live only in the reveal below.
+  // Remote machines that send telemetry here over Tailscale or the LAN. Tokens live only in the reveal below.
   import { LOCAL_HOST_ID, copyEnv, createHost, envText, lastSeenText, regenerateHostToken, removeHost, type Host, type HostCredentials } from "./hosts";
 
   let { hosts, listError, onChanged }: { hosts: Host[]; listError: string | null; onChanged: () => void } = $props();
@@ -10,6 +10,9 @@
   let reveal = $state<HostCredentials | null>(null);
   let revealAction = $state<"added" | "regenerated">("added");
   let copyNote = $state<{ ok: boolean; text: string } | null>(null);
+  // Which of this Mac's addresses goes into the env block.
+  let endpointIndex = $state(0);
+  let endpoint = $derived(reveal?.endpoints[endpointIndex] ?? null);
   let now = $state(Date.now());
   // Collapsed by default so the dashboard looks as before until someone opens it.
   let open = $state(false);
@@ -50,6 +53,7 @@
     revealListed = false;
     revealAction = kind;
     copyNote = null;
+    endpointIndex = 0;
   }
 
   function add(ev: SubmitEvent) {
@@ -78,7 +82,7 @@
   async function copy() {
     if (!reveal) return;
     const write = navigator.clipboard ? (t: string) => navigator.clipboard.writeText(t) : undefined;
-    const r = await copyEnv(reveal, write);
+    const r = await copyEnv(reveal, write, endpoint);
     // The reveal stays open either way; only Dismiss closes it.
     copyNote = r.ok ? { ok: true, text: "Copied." } : { ok: false, text: `Copy failed: ${r.error}. Select the text and copy it by hand.` };
   }
@@ -91,7 +95,7 @@
 
 <details id="hosts" class="card" bind:open>
   <summary><h2>Remote hosts{remotes.length ? ` (${remotes.length})` : ""}</h2></summary>
-  <p class="muted">Machines that send telemetry to this Mac over Tailscale. Adding a host never changes this Mac's Claude Code settings.</p>
+  <p class="muted">Machines that send telemetry to this Mac over Tailscale or your LAN. Adding a host never changes this Mac's Claude Code settings.</p>
 
   {#if listError}
     <p class="bad">Could not load hosts: {listError}</p>
@@ -128,16 +132,28 @@
         Paste this into <code>~/.claude/settings.json</code> on that machine, merged with any existing <code>env</code>, then restart Claude Code there.
       </p>
       <p class="warn">The token is shown only this once. It cannot be shown again; regenerate it if it is lost.</p>
-      {#if !reveal.tailscaleAddress}
+      {#if reveal.endpoints.length === 0}
         <p class="warn">
-          No Tailscale address was found on this Mac. Replace <code>&lt;THIS_MAC_TAILSCALE_IP&gt;</code> with this Mac's Tailscale IP, or start Tailscale and
-          regenerate the token.
+          No Tailscale or LAN address was found on this Mac. Replace <code>&lt;THIS_MAC_IP&gt;</code> with an address the remote machine can reach, or connect
+          this Mac to a network and regenerate the token.
         </p>
+      {:else}
+        <label class="endpoint-pick">
+          Reach this Mac at
+          <select bind:value={endpointIndex}>
+            {#each reveal.endpoints as e, i (e.url)}
+              <option value={i}>{e.network === "tailscale" ? "Tailscale" : "LAN"} {e.address} ({e.interface})</option>
+            {/each}
+          </select>
+        </label>
+        {#if endpoint?.network === "lan"}
+          <p class="warn">Over the LAN, telemetry and this token travel unencrypted. Use it only on a network you trust.</p>
+        {/if}
       {/if}
       {#if revealAction === "added"}
         <p class="muted">The collector now listens beyond this Mac so remote hosts can reach it. macOS may ask once to allow incoming connections.</p>
       {/if}
-      <pre>{envText(reveal)}</pre>
+      <pre>{envText(reveal, endpoint)}</pre>
       <button class="primary" onclick={copy}>Copy</button>
       <button onclick={dismiss}>Dismiss</button>
       {#if copyNote}
