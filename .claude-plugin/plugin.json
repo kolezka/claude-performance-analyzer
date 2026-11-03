@@ -1,7 +1,7 @@
 {
   "name": "performance-analyzer",
-  "version": "0.1.0",
-  "description": "Lets a coding agent ask what its Claude Code harness costs: hook time, text hooks inject into context, and Hindsight memory's share, with the plugin or settings file behind each cost. Read-only MCP server; needs Bun.",
+  "version": "0.2.0",
+  "description": "Lets a coding agent ask what its Claude Code harness costs: hook time, text hooks inject into context, and Hindsight memory's share, with the plugin or settings file behind each cost. A read-only MCP server plus a skill that tells the agent when to call it, how to read the numbers and where each fix goes; needs Bun.",
   "author": {
     "name": "Mariusz Rakus"
   },
