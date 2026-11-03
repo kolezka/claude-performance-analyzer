@@ -1,0 +1,17 @@
+{
+  "name": "performance-analyzer",
+  "version": "0.1.0",
+  "description": "Lets a coding agent ask what its Claude Code harness costs: hook time, text hooks inject into context, and Hindsight memory's share, with the plugin or settings file behind each cost. Read-only MCP server; needs Bun.",
+  "author": {
+    "name": "Mariusz Rakus"
+  },
+  "repository": "https://github.com/kolezka/claude-performance-analyzer",
+  "license": "MIT",
+  "keywords": ["performance", "hooks", "context", "tokens", "telemetry", "mcp"],
+  "mcpServers": {
+    "harness": {
+      "command": "bun",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/dist/mcp/server.js"]
+    }
+  }
+}

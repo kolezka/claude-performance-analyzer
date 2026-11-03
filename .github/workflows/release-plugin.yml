@@ -1,0 +1,65 @@
+name: Release plugin
+
+# Builds the MCP server bundles into dist/ and publishes a commit carrying them on the moving
+# `release` branch, which the kolezka marketplace installs from. A plugin install runs no
+# build step, so the installed tree must already hold dist/. main never carries it.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-plugin
+  cancel-in-progress: false
+
+jobs:
+  release:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      # Same pinned actions and Bun version as release-menubar.yml.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
+        with:
+          bun-version: 1.4.2
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      # Claude Code only offers an update when the version changes, so publishing the same
+      # version again would leave everyone who installed it on the old build.
+      - name: Refuse to republish an unchanged version
+        run: |
+          version="$(jq -r .version .claude-plugin/plugin.json)"
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+          if git fetch --quiet origin release 2>/dev/null; then
+            published="$(git show FETCH_HEAD:.claude-plugin/plugin.json | jq -r .version)"
+            if [ "$published" = "$version" ]; then
+              echo "::error::release already carries $version. Bump version in .claude-plugin/plugin.json first."
+              exit 1
+            fi
+          fi
+
+      - name: Check
+        run: |
+          bun run typecheck
+          bun test apps/mcp
+
+      - name: Build dist
+        run: bun run build:plugin
+
+      - name: Publish the release branch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add --force dist/mcp
+          git commit -m "chore(release): plugin v$VERSION with dist from $GITHUB_SHA"
+          git tag "plugin-v$VERSION"
+          git push origin "refs/tags/plugin-v$VERSION"
+          # release is generated output, not a development branch: each run replaces it.
+          git push --force origin "HEAD:refs/heads/release"

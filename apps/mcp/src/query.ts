@@ -1,6 +1,7 @@
 // Read-only SQL over the gathered harness data, for questions the named tools do not answer.
 // SQLite runs synchronously, so a query that never ends would freeze the whole server; each
 // query therefore runs in a child process that is killed when it runs too long.
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { UserError } from "./errors";
 import type { Harness } from "./gather";
@@ -10,7 +11,8 @@ import { telemetryPath } from "./telemetry";
 
 export { QUERY_SCHEMA } from "./query-db";
 
-const CHILD = join(import.meta.dir, "query-child.ts");
+// From source the child sits next to this file as .ts; in the plugin's dist/ bundle, as .js.
+const CHILD_CANDIDATES = [join(import.meta.dir, "query-child.ts"), join(import.meta.dir, "query-child.js")];
 const DEFAULT_TIMEOUT_MS = 10_000;
 const MAX_OUTPUT_BYTES = 1024 * 1024;
 
@@ -35,9 +37,11 @@ export function queryRows(h: Harness): QueryRows {
 
 export async function runIsolatedQuery(h: Harness, sql: string): Promise<string> {
   const clean = checkSql(sql);
+  const childScript = CHILD_CANDIDATES.find((p) => existsSync(p));
+  if (!childScript) throw new Error(`Query runner missing: none of ${CHILD_CANDIDATES.join(", ")} exists.`);
   const limit = timeoutMs();
   const started = performance.now();
-  const child = Bun.spawn([process.execPath, CHILD], {
+  const child = Bun.spawn([process.execPath, childScript], {
     stdin: "pipe",
     stdout: "pipe",
     stderr: "pipe",

@@ -153,11 +153,22 @@ Without remote hosts, nothing leaves your machine. With them, each remote machin
 
 `apps/mcp` is a stdio MCP server an agent can call to see what its harness costs, so it can trim or fix hooks, plugins and memory settings. It only reads: it never changes settings or hooks.
 
+It ships as the `performance-analyzer` Claude Code plugin. You need [Bun](https://bun.sh) on your `PATH`. Hook time also needs the collector running; without it, the injected-text answers still work and hook time says it is unavailable.
+
+```bash
+claude plugin marketplace add kolezka/marketplace
+claude plugin install performance-analyzer@kolezka
+```
+
+Start a new session afterwards. The tools show up as `mcp__plugin_performance-analyzer_harness__*`.
+
+To run it from a checkout instead, with no plugin:
+
 ```bash
 claude mcp add --scope user cpa-harness -- bun "$PWD/apps/mcp/src/index.ts"
 ```
 
-Run it with Bun from the source tree: `harness_query` starts a Bun child process for each query.
+To try the plugin build for one session: `bun run build:plugin`, then `claude --plugin-dir .`. Releases come from the `Release plugin` workflow, which builds `dist/` onto the `release` branch the marketplace installs from. Bump `version` in `.claude-plugin/plugin.json` first; the workflow refuses to republish the same version.
 
 | Tool | Answers |
 | --- | --- |

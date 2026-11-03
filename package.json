@@ -10,6 +10,7 @@
     "start": "bun run --filter @cpa/collector start",
     "dev": "bun run --filter @cpa/collector dev",
     "app": "bun run --filter @cpa/menubar start",
+    "build:plugin": "bun apps/mcp/scripts/build.ts",
     "test": "bun test",
     "typecheck": "tsc --noEmit"
   },
