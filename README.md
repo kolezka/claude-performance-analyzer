@@ -103,6 +103,8 @@ It needs [Bun](https://bun.sh) on your `PATH`. Hook timing comes from the teleme
 | `memory_cost` | How much Hindsight memory gets injected, and whether the agent reads it |
 | `harness_query` | One read-only SQL query over the same data, for anything else |
 
+The plugin also ships the `harness-cost` skill. It tells the agent when to reach for these tools, how to read the numbers and where each fix goes, so you can ask in plain words ("why is every prompt slow?").
+
 The server only reads. It never changes your settings or hooks, and it covers sessions on this Mac. Parameters and where each number comes from: [docs/mcp.md](docs/mcp.md).
 
 ## Your other machines
