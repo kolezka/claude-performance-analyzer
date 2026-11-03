@@ -1,6 +1,6 @@
 // The SQL side of harness_query: builds the query database from plain rows and runs one
 // SELECT. Kept free of other imports so the child process that runs queries starts fast.
-import { Database } from "bun:sqlite";
+import { constants, Database } from "bun:sqlite";
 import { existsSync } from "node:fs";
 import { UserError } from "./errors";
 
@@ -33,7 +33,8 @@ export function checkSql(sql: string): string {
 }
 
 export function buildQueryDb(rows: QueryRows, telemetryFile: string | null): Database {
-  const db = new Database(":memory:");
+  // URIs on, so ATTACH honours "?mode=ro". Bun's SQLite on Linux reads a URI as a file name otherwise.
+  const db = new Database(":memory:", constants.SQLITE_OPEN_READWRITE | constants.SQLITE_OPEN_CREATE | constants.SQLITE_OPEN_URI);
   db.run(`CREATE TABLE blocks (session_id TEXT, agent_id TEXT, project TEXT, ts_ms INTEGER, prompt_id TEXT, hook_event TEXT, hook_name TEXT,
     kind TEXT, chars INTEGER, est_tokens INTEGER, family TEXT, tag TEXT, signature TEXT, command TEXT, repeat INTEGER,
     persisted_size TEXT, read_back INTEGER, preview TEXT)`);
