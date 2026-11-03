@@ -1,14 +1,17 @@
 <h1 align="center">Claude Performance Analyzer</h1>
 
 <p align="center">
-  <strong>See where your Claude Code turns spend their time.</strong><br>
+  <strong>See why Claude Code feels slow.</strong><br>
   Model latency, tools, hooks, skills, subagents and MCP startup, live in your macOS menu bar.
 </p>
 
 <p align="center">
-  <img alt="macOS 14+" src="https://img.shields.io/badge/macOS-14%2B-black?logo=apple">
-  <img alt="Built with Bun" src="https://img.shields.io/badge/runtime-Bun-f9f1e1?logo=bun&logoColor=black">
-  <img alt="SwiftUI" src="https://img.shields.io/badge/UI-SwiftUI-F05138?logo=swift&logoColor=white">
+  <a href="https://github.com/kolezka/claude-performance-analyzer/releases/latest"><img alt="Download for macOS" src="https://img.shields.io/badge/Download-for%20macOS-black?style=for-the-badge&logo=apple"></a>
+</p>
+
+<p align="center">
+  <img alt="Latest release" src="https://img.shields.io/github/v/release/kolezka/claude-performance-analyzer?label=release">
+  <img alt="macOS 14+, Apple silicon and Intel" src="https://img.shields.io/badge/macOS-14%2B%20%C2%B7%20Apple%20silicon%20%2B%20Intel-black?logo=apple">
   <img alt="Local only" src="https://img.shields.io/badge/data-local%20only-2ea44f">
   <a href="LICENSE"><img alt="MIT License" src="https://img.shields.io/badge/license-MIT-blue"></a>
 </p>
@@ -21,44 +24,31 @@
 
 ---
 
-## Why
+A slow Claude Code turn can come from many places: the model, a long Bash call, a hook that runs on every prompt, an MCP server that takes seconds to connect. Claude Code already reports all of this through OpenTelemetry. Claude Performance Analyzer collects it on your Mac and shows you where the time goes.
 
-A slow Claude Code turn can come from many places: the model, a long Bash call, a hook that runs on every prompt, an MCP server that takes seconds to connect. Claude Code already reports all of this through OpenTelemetry. Claude Performance Analyzer collects that data on your machine and turns it into answers:
+## What you get
 
-- Is the model slow right now, or is it my setup?
-- Which hook adds time to every prompt?
-- Which tools, skills and subagents eat the most time?
-- What did this session cost, and how well is the prompt cache working?
+- **Latency in your menu bar.** The model's response time over the last 15 minutes, always in view. It turns into a warning sign when hooks slow you down.
+- **Where each turn spends its time.** Model, tools and hooks side by side, with the slowest items ranked.
+- **Details on click.** Any tool, hook or subagent opens a card with p50, p95, failures, a split by repository and recent calls.
+- **A full dashboard** in your browser: turn waterfall, recent prompts, skills, subagents, models, permission decisions, MCP connect times, errors and compaction.
+- **An MCP server for your agent.** Claude can check what its own setup costs and help you trim it. [See below](#let-your-agent-check-its-setup-mcp).
+- **Your other machines too.** Linux and macOS machines on your tailnet can send their telemetry to this Mac.
+- **Private.** Everything stays on your Mac, in a local database kept for 14 days.
 
-## Features
+## Get started
 
-- **Glanceable menu bar label.** API p50 latency over the last 15 minutes. It turns into a warning triangle when hooks are slow.
-- **Native SwiftUI panel.** Headline numbers, a latency chart, the API, tools and hooks split, and ranked lists, in 15m, 1h, 24h or 7d windows.
-- **Drill-down detail cards.** Click any row to see its count, failures, p50, p95 and max, a split by repository, and recent calls.
-- **Live feed.** Hook, tool and model events as they arrive, within a few seconds.
-- **Web dashboard.** Turn waterfall, recent prompts, skills, subagents, models, permission decisions, MCP connect times, errors and compaction.
-- **One-click setup.** The dashboard adds the needed telemetry variables to `~/.claude/settings.json`, keeps your existing values and writes a backup first.
-- **MCP server for coding agents.** An agent can ask what its own harness costs: hook time, how much text hooks inject into context, and how much of that is Hindsight memory.
-- **Remote hosts.** Other Linux or macOS machines on your tailnet can send their telemetry here, each with its own token. Pick a host in the panel or the dashboard to see its numbers.
-- **Private by design.** With no remote hosts the collector listens on `127.0.0.1` only. Data stays in a local SQLite file for 14 days.
+1. **Download** the `.dmg` from the [latest release](https://github.com/kolezka/claude-performance-analyzer/releases/latest). It is signed and notarized, and runs on Apple silicon and Intel Macs with macOS 14 or later.
+2. **Install.** Open the `.dmg`, drag **ClaudeTelemetry** to Applications and open it. It appears in your menu bar.
+3. **Connect Claude Code.** Click the menu bar item and choose **Open Dashboard** (or open http://127.0.0.1:4318), then click **Add … missing settings**. This adds the telemetry settings to `~/.claude/settings.json`. Your existing values are kept, and a backup is written first.
+4. **Start a new Claude Code session.** Numbers show up within seconds. Sessions that were already running are not recorded.
 
-## Quick start
+The app keeps recording in the background, even while its panel is closed. You can turn that off in the app's Settings > General, or in System Settings > General > Login Items.
 
-**Requirements:** macOS 14 or later.
+<details>
+<summary>Prefer to edit the settings yourself?</summary>
 
-Download the `.dmg` from the [latest release](https://github.com/kolezka/claude-performance-analyzer/releases/latest), drag ClaudeTelemetry to Applications and open it. The app ships the collector and starts it in the background as a login item, so it keeps recording while the app is closed. You can turn it off in Settings > General, or in System Settings > General > Login Items.
-
-To build from source instead, you need [Bun](https://bun.sh) and Xcode 26:
-
-```bash
-git clone https://github.com/kolezka/claude-performance-analyzer.git
-cd claude-performance-analyzer
-bun install
-bun run start      # collector and dashboard on http://127.0.0.1:4318
-bun run app        # build and open the menu bar app
-```
-
-Then connect Claude Code. Open http://127.0.0.1:4318 and use the setup button, or add these to the `env` block of `~/.claude/settings.json` yourself:
+Add these to the `env` block of `~/.claude/settings.json`:
 
 ```bash
 CLAUDE_CODE_ENABLE_TELEMETRY=1
@@ -72,154 +62,85 @@ CLAUDE_CODE_ENHANCED_TELEMETRY_BETA=1   # optional: time to first token, turn sp
 OTEL_TRACES_EXPORTER=otlp
 ```
 
-Start a new Claude Code session. Only sessions started after this point are recorded.
-
-The setup button always configures this Mac, whichever host you have selected.
-
-## Remote hosts
-
-Claude Code on another machine (Linux or macOS) can send its telemetry to the collector on this Mac over [Tailscale](https://tailscale.com). Nothing of ours runs on the other machine.
-
-1. On this Mac, open the Hosts section in the dashboard or the Hosts tab in the app's Settings, and add a host with a name.
-2. Copy the `env` block it shows. It holds the host's token and this Mac's Tailscale address, and it is shown only once. Regenerate the token if you lose it.
-3. Paste the block into the `env` of `~/.claude/settings.json` on the other machine and start a new Claude Code session there.
-
-The block looks like this:
-
-```json
-{
-  "env": {
-    "OTEL_EXPORTER_OTLP_ENDPOINT": "http://100.x.y.z:4318",
-    "OTEL_EXPORTER_OTLP_HEADERS": "Authorization=Bearer cpa_...",
-    "...": "the same telemetry variables as above"
-  }
-}
-```
-
-If this Mac has no Tailscale address when you add the host, the block says `<THIS_MAC_TAILSCALE_IP>`. Replace it with the address from `tailscale ip -4`.
-
-What to expect:
-
-- Adding the first host makes the collector listen on all addresses (`::`, IPv4 and IPv6). macOS may ask once whether to allow incoming connections. Removing the last host takes it back to `127.0.0.1` only. Neither needs a restart.
-- Remote data is accepted only from Tailscale addresses (`100.64.0.0/10`, `fd7a:115c:a1e0::/48`) and only with a valid token. Anything else gets `401` or `403` and nothing is stored.
-- The dashboard, the API, setup, host management and the live feed answer to this Mac only. A tailnet peer gets `403` on all of them, even with a faked `Host` header.
-- Removing a host deletes its token and all of its saved telemetry. Regenerating a token stops the old one at once.
-- This Mac cannot see the other machine's disk, so remote rows show the paths as they were sent, with no repo name, worktree or branch lookup. Remote hooks show what telemetry registered (event, matcher, source, plugin), not the command or config file.
+</details>
 
 ## The menu bar app
 
 <img src="docs/screenshots/menubar-panel.png" alt="Menu bar panel with API latency, turn time split, slowest and total-time rankings, and live feed" width="320" align="right">
 
-<img src="docs/screenshots/menubar-label.png" alt="Menu bar label showing API p50 latency" width="64">
+The label shows the model's p50 latency over the last 15 minutes. It changes to a warning triangle when hooks take more than 15% of turn time, or when one hook's p95 is above 2 seconds.
 
-The **label** shows API p50 latency over the last 15 minutes and refreshes every 2 seconds. Hooks count as slow when they take more than 15% of in-turn time, or when one hook has a p95 above 2s. Then the gauge changes to a warning triangle.
+Click it to open the panel: headline numbers, a latency chart, where turn time goes, the slowest items, the biggest total time and a live feed. Switch between 15 minutes, 1 hour, 24 hours and 7 days, or between this Mac and a remote host.
 
-Click the label to open the **panel**:
-
-| Section | What it shows |
-| --- | --- |
-| Header | Host picker (This Mac or a remote host), time window picker (15m, 1h, 24h, 7d) and collector status |
-| Headline numbers | API p50 and p95, time to first token, turn duration, cost, cache hit rate, sessions |
-| API latency | p50 and p95 over time |
-| Where turn time goes | Split between API, tools and hooks |
-| Slowest | Top items by p95, filtered by tools, hooks or agents |
-| By total time | Top items by summed duration, with the same filters |
-| Live | Latest hook, tool and model events |
-
-The panel polls only while it is open.
-
-**Settings** let you launch at login, pick the default window and the windows in the header, point at another collector URL, tune polling intervals, change the label style, set the panel width and hide any section. The **Hosts** tab adds, regenerates and removes remote hosts.
+Everything in the panel can be tuned or hidden in Settings. More on each section: [docs/menu-bar-app.md](docs/menu-bar-app.md).
 
 <br clear="right">
 
-## How it works
+## Let your agent check its setup (MCP)
 
-```
-                       this Mac
-Claude Code ──OTLP, loopback──────────▶ collector :4318 ──▶ SQLite
-                                         │  (127.0.0.1 only, or
-remote machine (optional)                │   all addresses once a
-Claude Code ──OTLP, Tailscale + token───▶│   remote host exists)
-                                         │
-                                         ├── /api/* over loopback ──▶ menu bar app
-                                         └── web dashboard over loopback
-```
+Hooks, plugins and memory tools add time and text to every prompt, and you rarely see how much. The `performance-analyzer` plugin gives Claude Code a read-only MCP server, so the agent can look at its own harness and tell you what to fix.
 
-Claude Code exports logs, metrics and traces over OTLP. The collector decodes them, stores them in `~/.claude-telemetry/telemetry.sqlite` and serves a small JSON API. The menu bar app and the dashboard both read from that API over loopback.
+Ask it things like:
 
-Without remote hosts, nothing leaves your machine. With them, each remote machine's telemetry crosses your tailnet to this Mac, authenticated by its token. Stored data and every API read stay on this Mac. Every stored row carries the host its token belongs to, and each read shows one host at a time.
+- "Which hooks slow down my prompts the most?"
+- "How much text do my hooks add to every prompt, and which plugin adds it?"
+- "How much of my context is Hindsight memory, and does it get used?"
 
-## Ask from a coding agent (MCP)
-
-`apps/mcp` is a stdio MCP server an agent can call to see what its harness costs, so it can trim or fix hooks, plugins and memory settings. It only reads: it never changes settings or hooks.
-
-It ships as the `performance-analyzer` Claude Code plugin. You need [Bun](https://bun.sh) on your `PATH`. Hook time also needs the collector running; without it, the injected-text answers still work and hook time says it is unavailable.
+Install it, then start a new session:
 
 ```bash
 claude plugin marketplace add kolezka/marketplace
 claude plugin install performance-analyzer@kolezka
 ```
 
-Start a new session afterwards. The tools show up as `mcp__plugin_performance-analyzer_harness__*`.
+It needs [Bun](https://bun.sh) on your `PATH`. Hook timing comes from the telemetry the app records, so install the app first. Without the app, the answers about injected text still work.
 
-To run it from a checkout instead, with no plugin:
-
-```bash
-claude mcp add --scope user cpa-harness -- bun "$PWD/apps/mcp/src/index.ts"
-```
-
-To try the plugin build for one session: `bun run build:plugin`, then `claude --plugin-dir .`. Releases come from the `Release plugin` workflow, which builds `dist/` onto the `release` branch the marketplace installs from. Bump `version` in `.claude-plugin/plugin.json` first; the workflow refuses to republish the same version.
-
-| Tool | Answers |
+| Tool | What it answers |
 | --- | --- |
 | `harness_summary` | Start here: hook time, injected text and the Hindsight share in one answer |
-| `hook_time` | Per hook: firings, total, p50, p95, max, errors, share of active turn time, and per-command runs with the plugin or settings file that owns them |
-| `injected_context` | What hooks put into the model's context, grouped by source, event, prompt, session or project, with owners and identical repeats |
-| `memory_cost` | Hindsight injection by tag, per prompt, recalls too large for context and whether the agent read them back |
-| `harness_query` | One read-only SQL query over the same data and the telemetry tables, run in a child process and stopped after 10 seconds |
+| `hook_time` | Time per hook, with the plugin or settings file that owns it |
+| `injected_context` | What hooks put into the model's context, and who put it there |
+| `memory_cost` | How much Hindsight memory gets injected, and whether the agent reads it |
+| `harness_query` | One read-only SQL query over the same data, for anything else |
 
-Every tool takes `session`: `current` (default), `all`, or a session id. `since` (`15m`, `1h`, `24h`, `7d`) and `project` narrow it down. `current` is the session that started the server, from `CLAUDE_CODE_SESSION_ID`; each answer names the session it used.
+The server only reads. It never changes your settings or hooks, and it covers sessions on this Mac. Parameters and where each number comes from: [docs/mcp.md](docs/mcp.md).
 
-Where the numbers come from:
+## Your other machines
 
-- Hook time comes from the collector's telemetry. All hooks of one event run in parallel, so a firing's time is wall time, not per script. Per-command times come from the transcripts, which Claude Code writes only for some hooks. The share of active turn time is given for whole sessions only, since a `since` window cuts turns in half.
-- Injected text comes from the session transcripts in `~/.claude/projects`, counted as the model received it, including the reminder wrapper Claude Code puts around it. Output too large for context counts as the preview Claude Code showed; it counts as read back only when the agent read the whole saved file and the read succeeded. Telemetry's own character count differs: it counts that output at full size and does not see every hook.
-- Tokens are estimates: characters / 4.
-- A block that no recorded hook run printed is reported as unattributed, with the hooks configured for that event. Hindsight blocks are recognised by their `<hindsight_*>` tags.
-- Transcripts stay on the machine that ran the session, so the server covers sessions on this Mac, not remote hosts.
+Claude Code on another Linux or macOS machine can send its telemetry to this Mac over [Tailscale](https://tailscale.com). Nothing extra runs on the other machine.
 
-`bun apps/mcp/scripts/probe.ts harness_summary '{"session":"all","since":"7d"}'` runs one tool from the shell and prints how long it took.
+1. In the app, open Settings > Hosts and add a host.
+2. Copy the `env` block it shows. It is shown only once.
+3. Paste it into `~/.claude/settings.json` on the other machine and start a new Claude Code session there.
 
-## Project layout
+Pick the host in the panel or the dashboard to see its numbers. Security and limits: [docs/remote-hosts.md](docs/remote-hosts.md).
 
-Bun workspaces. Each package has its own `src/` and `test/`.
+## Privacy
 
-| Path | What it does |
-| --- | --- |
-| `apps/collector` | Bun OTLP receiver (http/json or http/protobuf, gzip ok) on `127.0.0.1:4318`, or on all addresses while remote hosts exist. Stores to SQLite with 14 day retention, partitioned by host. Serves the dashboard and the JSON API. `scripts/compile.ts` builds it into a standalone binary for the app bundle. |
-| `apps/dashboard` | Svelte web dashboard, bundled by the collector through its HTML import. |
-| `apps/mcp` | Read-only stdio MCP server for coding agents: hook time, hook-injected context and Hindsight memory cost, from telemetry and session transcripts. |
-| `apps/menubar` | SwiftUI menu bar app (`MenuBarExtra`), built with `swiftc` into a universal (arm64 and x86_64) `.app`. Bundles the compiled collector and runs it as a LaunchAgent. Code in `Sources/`, plists and icon in `Resources/`, build and release in `scripts/`. |
-| `packages/otlp` | Decodes OTLP http/json and http/protobuf into rows. |
-| `packages/analytics` | Summaries, percentiles, turn timelines. Shared by the collector and the dashboard. |
-| `packages/claude-settings` | Adds the telemetry variables to Claude Code's `settings.json`. |
+- The collector listens on `127.0.0.1` only. It opens to your tailnet only after you add a remote host, and then accepts telemetry only from Tailscale addresses with a valid token.
+- Data lives in `~/.claude-telemetry/telemetry.sqlite` on your Mac and is deleted after 14 days.
+- Without remote hosts, nothing leaves your Mac.
 
-## Development
+## Good to know
+
+- Only sessions started after you connect Claude Code are recorded. There is no backfill.
+- Telemetry times hooks per event and matcher (`PreToolUse:Bash`), not per script. Per-script detail needs detailed beta tracing. The MCP server adds per-command times where Claude Code logs them.
+- Rules have no timing in telemetry. They only appear as `source: config` permission decisions.
+- "Where turn time goes" adds up durations, so parallel tool calls overlap.
+
+## Build from source
+
+You need [Bun](https://bun.sh) and Xcode 26.
 
 ```bash
-bun run dev        # collector in development mode
-bun test           # all packages
-bun run typecheck
+git clone https://github.com/kolezka/claude-performance-analyzer.git
+cd claude-performance-analyzer
+bun install
+bun run start      # collector and dashboard on http://127.0.0.1:4318
+bun run app        # build and open the menu bar app
 ```
 
-A `Makefile` wraps the same commands. Run `make` to list targets.
-
-## Limits
-
-- Only sessions started after telemetry is turned on are recorded. There is no backfill.
-- Rules have no timing in telemetry. They only appear as `source: config` permission decisions.
-- Hook timing is per hook event and matcher (`PreToolUse:Bash`), not per script. Per-script detail needs detailed beta tracing.
-- "Where turn time goes" adds up component durations, so parallel tool calls overlap.
+How it fits together, the project layout and how releases work: [docs/development.md](docs/development.md).
 
 ## License
 
