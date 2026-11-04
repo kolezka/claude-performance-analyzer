@@ -22,6 +22,8 @@ jobs:
     runs-on: macos-26
     # Holds the signing secrets. A required reviewer makes every run wait for approval.
     environment: release
+    outputs:
+      version: ${{ steps.version.outputs.version }}
     steps:
       # v7.0.1, pinned by SHA because this job holds the signing key.
       # No saved token, so bun install and the build cannot push. The publish step logs git in itself.
@@ -98,6 +100,55 @@ jobs:
           gh auth setup-git
           apps/menubar/scripts/release.sh
 
+      - name: Record the released version
+        id: version
+        run: echo "version=$APP_VERSION" >> "$GITHUB_OUTPUT"
+
       - name: Delete keychain
         if: always()
         run: security delete-keychain "$RUNNER_TEMP/release.keychain-db" || true
+
+  # A separate job, so a failed bump can be rerun alone without cutting a new version.
+  homebrew:
+    needs: release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Update the cask in kolezka/homebrew-tap
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.release.outputs.version }}
+          # Write deploy key on kolezka/homebrew-tap, so this secret can touch only that repo.
+          TAP_DEPLOY_KEY: ${{ secrets.HOMEBREW_TAP_DEPLOY_KEY }}
+        run: |
+          if [[ -z "$VERSION" || -z "$TAP_DEPLOY_KEY" ]]; then
+            echo "Missing the release version or the HOMEBREW_TAP_DEPLOY_KEY secret." >&2
+            exit 1
+          fi
+          # Hash the file users download, not a local build.
+          DMG="ClaudeTelemetry-$VERSION.dmg"
+          gh release download "v$VERSION" --repo "$GITHUB_REPOSITORY" --pattern "$DMG" --dir "$RUNNER_TEMP"
+          SHA="$(sha256sum "$RUNNER_TEMP/$DMG" | cut -d' ' -f1)"
+
+          KEY="$RUNNER_TEMP/tap-deploy-key"
+          trap 'rm -f "$KEY"' EXIT
+          (umask 077 && printf '%s\n' "$TAP_DEPLOY_KEY" > "$KEY")
+          # GitHub's host keys come from its API over HTTPS, so SSH does not trust on first use.
+          curl -fsSL https://api.github.com/meta | jq -r '.ssh_keys[] | "github.com " + .' > "$RUNNER_TEMP/known_hosts"
+          export GIT_SSH_COMMAND="ssh -i $KEY -o IdentitiesOnly=yes -o UserKnownHostsFile=$RUNNER_TEMP/known_hosts"
+
+          TAP="$RUNNER_TEMP/tap"
+          git clone --depth 1 git@github.com:kolezka/homebrew-tap.git "$TAP"
+          CASK="$TAP/Casks/claude-telemetry.rb"
+          sed -i -E "s/^  version \"[^\"]*\"$/  version \"$VERSION\"/; s/^  sha256 \"[0-9a-f]{64}\"$/  sha256 \"$SHA\"/" "$CASK"
+          # A sed that matches nothing exits 0, so check that both lines now hold the new values.
+          grep -qxF "  version \"$VERSION\"" "$CASK"
+          grep -qxF "  sha256 \"$SHA\"" "$CASK"
+          if git -C "$TAP" diff --quiet; then
+            echo "Cask already at $VERSION."
+            exit 0
+          fi
+          git -C "$TAP" -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+            commit -qam "claude-telemetry $VERSION"
+          git -C "$TAP" push origin HEAD:main
