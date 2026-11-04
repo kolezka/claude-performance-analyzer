@@ -19,10 +19,11 @@ jobs:
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
-      # Same pinned actions and Bun version as release-menubar.yml.
+      # Same pinned actions, Bun version and unsaved token as release-menubar.yml.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
         with:
@@ -54,7 +55,10 @@ jobs:
         run: bun run build:plugin
 
       - name: Publish the release branch
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
+          gh auth setup-git
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add --force dist/mcp
