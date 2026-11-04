@@ -40,6 +40,13 @@ A slow Claude Code turn can come from many places: the model, a long Bash call, 
 
 1. **Download** the `.dmg` from the [latest release](https://github.com/kolezka/claude-performance-analyzer/releases/latest). It is signed and notarized, and runs on Apple silicon and Intel Macs with macOS 14 or later.
 2. **Install.** Open the `.dmg`, drag **ClaudeTelemetry** to Applications and open it. It appears in your menu bar.
+
+   Or skip steps 1 and 2 with Homebrew, then open ClaudeTelemetry from Applications:
+
+   ```bash
+   brew install --cask kolezka/tap/claude-telemetry
+   brew trust kolezka/tap   # lets a plain `brew upgrade` update it
+   ```
 3. **Connect Claude Code.** Click the menu bar item and choose **Open Dashboard** (or open http://127.0.0.1:4318), then click **Add … missing settings**. This adds the telemetry settings to `~/.claude/settings.json`. Your existing values are kept, and a backup is written first.
 4. **Start a new Claude Code session.** Numbers show up within seconds. Sessions that were already running are not recorded.
 

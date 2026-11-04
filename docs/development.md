@@ -57,5 +57,5 @@ Bun workspaces. Each package has its own `src/` and `test/`.
 
 ## Releases
 
-- **Menu bar app:** run the `Release menu bar app` workflow on `main` and pick `patch`, `minor` or `major`. It builds a signed, notarized `.dmg`, tags the version and publishes a GitHub release. The `release` environment holds the signing certificate and the notarization credentials, and a required reviewer approves each run.
+- **Menu bar app:** run the `Release menu bar app` workflow on `main` and pick `patch`, `minor` or `major`. It builds a signed, notarized `.dmg`, tags the version and publishes a GitHub release. The `release` environment holds the signing certificate and the notarization credentials, and a required reviewer approves each run. A second job then sets the new version and the DMG's sha256 in the `claude-telemetry` cask in [kolezka/homebrew-tap](https://github.com/kolezka/homebrew-tap). It pushes with the `HOMEBREW_TAP_DEPLOY_KEY` secret, a write deploy key on the tap. If only that job fails, rerun it from the run page: it does not cut a new version.
 - **MCP plugin:** see [mcp.md](mcp.md#development).
