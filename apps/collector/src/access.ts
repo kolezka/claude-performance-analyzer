@@ -3,7 +3,7 @@
 import { hashToken, LOCAL_HOST_ID } from "./hosts";
 import type { Store } from "./db";
 
-export type Peer = "loopback" | "tailscale" | "other";
+export type Peer = "loopback" | "tailscale" | "lan" | "other";
 
 function parseIPv4(text: string): number[] | null {
   const parts = text.split(".");
@@ -58,6 +58,11 @@ function classifyIPv4(v4: number[]): Peer {
   if (v4[0] === 127) return "loopback";
   // 100.64.0.0/10: second octet 64..127.
   if (v4[0] === 100 && v4[1]! >= 64 && v4[1]! <= 127) return "tailscale";
+  // Private ranges 10/8, 172.16/12, 192.168/16, and link-local 169.254/16.
+  if (v4[0] === 10) return "lan";
+  if (v4[0] === 172 && v4[1]! >= 16 && v4[1]! <= 31) return "lan";
+  if (v4[0] === 192 && v4[1] === 168) return "lan";
+  if (v4[0] === 169 && v4[1] === 254) return "lan";
   return "other";
 }
 
@@ -65,7 +70,10 @@ export function classifyPeer(address: string | null): Peer {
   if (!address) return "other";
   const v4 = parseIPv4(address);
   if (v4) return classifyIPv4(v4);
-  const v6 = parseIPv6(address);
+  // A link-local peer can come with a zone ("fe80::1%en0"). The zone names our interface, not the peer.
+  const zone = address.indexOf("%");
+  if (zone !== -1 && (zone === address.length - 1 || !address.includes(":"))) return "other";
+  const v6 = parseIPv6(zone === -1 ? address : address.slice(0, zone));
   if (!v6) return "other";
   if (v6.slice(0, 7).every((g) => g === 0) && v6[7] === 1) return "loopback";
   // IPv4-mapped ::ffff:a.b.c.d, which a dual-stack listener reports for IPv4 clients.
@@ -74,13 +82,16 @@ export function classifyPeer(address: string | null): Peer {
   }
   // fd7a:115c:a1e0::/48
   if (v6[0] === 0xfd7a && v6[1] === 0x115c && v6[2] === 0xa1e0) return "tailscale";
+  // Unique local fc00::/7 (Tailscale's range above sits inside it) and link-local fe80::/10.
+  if ((v6[0]! & 0xfe00) === 0xfc00) return "lan";
+  if ((v6[0]! & 0xffc0) === 0xfe80) return "lan";
   return "other";
 }
 
 const deny = (status: 401 | 403, error: string) => Response.json({ error }, { status, headers: { "cache-control": "no-store" } });
 
 // Loopback without a token is this Mac. Anything carrying a token must carry a valid one, even
-// on loopback. Peers outside loopback and Tailscale are refused before any token lookup.
+// on loopback. Peers outside loopback, Tailscale and private LAN are refused before any token lookup.
 export function authorizeIngest(address: string | null, authorization: string | null, store: Pick<Store, "hostForTokenHash">): { hostId: string } | Response {
   const peer = classifyPeer(address);
   if (peer === "other") return deny(403, "forbidden");

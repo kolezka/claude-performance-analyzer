@@ -3,11 +3,13 @@ import type { LiveEvent } from "@cpa/analytics";
 import { fmtMs } from "@cpa/analytics";
 
 export type Host = { id: string; name: string; createdMs: number | null; lastSeenMs: number | null };
+export type HostEndpoint = { network: "tailscale" | "lan"; interface: string; address: string; url: string };
 export type HostCredentials = {
   host: Host;
   token: string;
+  // Points at endpoints[0], or at a placeholder when there are none.
   env: Record<string, string>;
-  tailscaleAddress: string | null;
+  endpoints: HostEndpoint[];
 };
 
 export const LOCAL_HOST_ID = "local";
@@ -160,17 +162,19 @@ export async function removeHost(fetchFn: FetchFn, id: string): Promise<void> {
   await send(fetchFn, `/api/hosts/${encodeURIComponent(id)}`, "DELETE", {}, 204);
 }
 
-export function envText(creds: HostCredentials): string {
-  return JSON.stringify({ env: creds.env }, null, 2);
+export function envText(creds: HostCredentials, endpoint: HostEndpoint | null = null): string {
+  const env = endpoint ? { ...creds.env, OTEL_EXPORTER_OTLP_ENDPOINT: endpoint.url } : creds.env;
+  return JSON.stringify({ env }, null, 2);
 }
 
 export async function copyEnv(
   creds: HostCredentials,
   write: ((text: string) => Promise<void>) | undefined,
+  endpoint: HostEndpoint | null = null,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   if (!write) return { ok: false, error: "Clipboard is not available in this browser." };
   try {
-    await write(envText(creds));
+    await write(envText(creds, endpoint));
     return { ok: true };
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : String(err) };

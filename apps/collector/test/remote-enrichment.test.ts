@@ -66,7 +66,7 @@ function telemetry(now: number): EventRow[] {
 
 function setup() {
   const store = openStore(join(mkdtempSync(join(tmpdir(), "cc-remote-enrich-db-")), "t.sqlite"));
-  const handler = createHandler({ store, port: PORT, assets: () => new Response(""), rebind: () => {}, publish: () => {}, tailscaleAddress: () => null });
+  const handler = createHandler({ store, port: PORT, assets: () => new Response(""), rebind: () => {}, publish: () => {}, addresses: () => [] });
   const host = store.createHost("remote", "0".repeat(64), 1);
   const now = Date.now();
   store.addEvents(telemetry(now));

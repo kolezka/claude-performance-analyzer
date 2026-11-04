@@ -128,7 +128,7 @@ test("telemetryEnv with a string endpoint keeps it verbatim and adds the exact h
     OTEL_EXPORTER_OTLP_ENDPOINT: "http://100.101.102.103:4318",
     OTEL_EXPORTER_OTLP_HEADERS: "Authorization=Bearer cpa_abc",
   });
-  const placeholder = telemetryEnv("http://<THIS_MAC_TAILSCALE_IP>:4318");
-  expect(placeholder.OTEL_EXPORTER_OTLP_ENDPOINT).toBe("http://<THIS_MAC_TAILSCALE_IP>:4318");
+  const placeholder = telemetryEnv("http://<THIS_MAC_IP>:4318");
+  expect(placeholder.OTEL_EXPORTER_OTLP_ENDPOINT).toBe("http://<THIS_MAC_IP>:4318");
   expect("OTEL_EXPORTER_OTLP_HEADERS" in placeholder).toBe(false);
 });

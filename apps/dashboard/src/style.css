@@ -207,3 +207,7 @@ button.primary:disabled { opacity: 0.6; cursor: default; }
 }
 .reveal { margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--grid); }
 .reveal pre { white-space: pre-wrap; overflow-wrap: anywhere; user-select: all; }
+.endpoint-pick { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.endpoint-pick select {
+  font: inherit; color: var(--ink); background: var(--page); border: 1px solid var(--border); border-radius: 8px; padding: 4px 8px; max-width: 100%;
+}

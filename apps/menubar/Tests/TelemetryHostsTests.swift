@@ -411,7 +411,11 @@ func stagedStale(_ h: Harness, target: String, switching: OwnerSwitch) async thr
 
 func credentialsJSON(token: String) -> [String: Any] {
     ["host": hostJSON("box", "Box"), "token": token,
-     "env": ["OTEL_EXPORTER_OTLP_HEADERS": "Authorization=Bearer \(token)"], "tailscaleAddress": "100.64.0.1"]
+     "env": ["OTEL_EXPORTER_OTLP_HEADERS": "Authorization=Bearer \(token)"], "endpoints": [endpointJSON("tailscale", "100.64.0.1")]]
+}
+
+func endpointJSON(_ network: String, _ address: String, interface: String = "en0") -> [String: Any] {
+    ["network": network, "interface": interface, "address": address, "url": "http://\(address):4318"]
 }
 
 // A collector whose management writes and follow-up host list can each be held. A write
@@ -550,7 +554,7 @@ struct TelemetryHostsTests {
             let store = IsolatedDefaults(); defer { store.cleanup() }
             let creds: [String: Any] = [
                 "host": hostJSON("a/b", "box"), "token": "cpa_TESTTOKEN",
-                "env": ["OTEL_EXPORTER_OTLP_HEADERS": "Authorization=Bearer cpa_TESTTOKEN"], "tailscaleAddress": "100.64.0.1",
+                "env": ["OTEL_EXPORTER_OTLP_HEADERS": "Authorization=Bearer cpa_TESTTOKEN"], "endpoints": [endpointJSON("tailscale", "100.64.0.1")],
             ]
             MockServer.current = MockServer { req in
                 switch (req.method, req.path(base: "/base/")) {
@@ -588,6 +592,31 @@ struct TelemetryHostsTests {
             h.check(Telemetry.origin(of: URL(string: "http://[::1]:4318/")!) == "http://[::1]:4318", "ipv6 brackets")
         }
 
+        await h.run("env block follows the chosen endpoint") {
+            let env = ["OTEL_EXPORTER_OTLP_ENDPOINT": "http://100.64.0.1:4318", "OTEL_EXPORTER_OTLP_HEADERS": "Authorization=Bearer cpa_X"]
+            let json: [String: Any] = [
+                "host": hostJSON("n1", "Box"), "token": "cpa_X", "env": env,
+                "endpoints": [endpointJSON("tailscale", "100.64.0.1", interface: "utun4"), endpointJSON("lan", "192.168.50.223")],
+            ]
+            let creds = try JSONDecoder().decode(HostCredentials.self, from: JSONSerialization.data(withJSONObject: json))
+            let endpoints = creds.endpoints ?? []
+            h.check(endpoints.map(\.address) == ["100.64.0.1", "192.168.50.223"], "endpoints \(endpoints)")
+            h.check(endpoints.map(\.isLAN) == [false, true], "isLAN \(endpoints.map(\.isLAN))")
+            let envOf = { (block: String) in ((try? JSONSerialization.jsonObject(with: Data(block.utf8))) as? [String: [String: String]])?["env"] }
+            h.check(envOf(creds.envBlock()) == env, "default block keeps the collector's env")
+            var lanEnv = env
+            lanEnv["OTEL_EXPORTER_OTLP_ENDPOINT"] = "http://192.168.50.223:4318"
+            h.check(envOf(creds.envBlock(using: endpoints.last)) == lanEnv, "LAN block: \(creds.envBlock(using: endpoints.last))")
+            h.check(creds.env == env, "choosing an endpoint must not change the decoded env")
+
+            // An older collector sends no endpoints. That still decodes, so its one-time token is not lost.
+            var old = json
+            old.removeValue(forKey: "endpoints")
+            let oldCreds = try JSONDecoder().decode(HostCredentials.self, from: JSONSerialization.data(withJSONObject: old))
+            h.check(oldCreds.endpoints == nil, "missing endpoints should decode as nil")
+            h.check(envOf(oldCreds.envBlock()) == env, "old collector block keeps its env")
+        }
+
         await h.run("credentials decode, refresh the list and never persist") {
             let store = IsolatedDefaults(); defer { store.cleanup() }
             var created = false
@@ -599,9 +628,9 @@ struct TelemetryHostsTests {
                     created = true
                     return .json(201, [
                         "host": hostJSON("n1", "New box"), "token": token,
-                        "env": ["OTEL_EXPORTER_OTLP_ENDPOINT": "http://<THIS_MAC_TAILSCALE_IP>:4318",
+                        "env": ["OTEL_EXPORTER_OTLP_ENDPOINT": "http://<THIS_MAC_IP>:4318",
                                 "OTEL_EXPORTER_OTLP_HEADERS": "Authorization=Bearer \(token)"],
-                        "tailscaleAddress": NSNull(),
+                        "endpoints": [Any](),
                     ])
                 default: return .status(404)
                 }
@@ -610,9 +639,9 @@ struct TelemetryHostsTests {
             let creds = try await model.addHost(name: "New box")
             h.check(creds.token == token, "token")
             h.check(creds.host.id == "n1" && creds.host.name == "New box", "host")
-            h.check(creds.tailscaleAddress == nil, "tailscaleAddress should be nil")
+            h.check(creds.endpoints == [], "endpoints should be empty: \(String(describing: creds.endpoints))")
             h.check(creds.env["OTEL_EXPORTER_OTLP_HEADERS"] == "Authorization=Bearer \(token)", "env header")
-            let block = creds.envBlock
+            let block = creds.envBlock()
             let parsed = (try? JSONSerialization.jsonObject(with: Data(block.utf8))) as? [String: [String: String]]
             h.check(parsed?["env"] == creds.env, "env block round-trips: \(block)")
             h.check(model.hosts.map(\.id) == ["local", "n1"], "list refreshed after add: \(model.hosts.map(\.id))")

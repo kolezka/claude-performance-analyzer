@@ -46,7 +46,7 @@ function rowsFor(h: (typeof HOSTS)[number], now: number): { events: EventRow[]; 
 
 function setup() {
   const store = openStore(join(mkdtempSync(join(tmpdir(), "cc-host-scope-")), "t.sqlite"));
-  const handler = createHandler({ store, port: PORT, assets: () => new Response(""), rebind: () => {}, publish: () => {}, tailscaleAddress: () => null });
+  const handler = createHandler({ store, port: PORT, assets: () => new Response(""), rebind: () => {}, publish: () => {}, addresses: () => [] });
   const ids: Record<string, string> = { local: "local" };
   const now = Date.now();
   for (const h of HOSTS) {

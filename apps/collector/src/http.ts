@@ -1,6 +1,6 @@
 // The collector's one public request handler. A peer-address gate runs before anything else:
-// only the three OTLP ingest posts are open to Tailscale peers (with a token), everything else
-// is for this Mac's own loopback clients, with Host/Origin checks on top.
+// only the three OTLP ingest posts are open to Tailscale and private LAN peers (with a token),
+// everything else is for this Mac's own loopback clients, with Host/Origin checks on top.
 import { networkInterfaces } from "node:os";
 import { decodeOtlp, parseLogs, parseMetrics, parseTraces, type EventRow, type Signal } from "@cpa/otlp";
 import {
@@ -27,7 +27,7 @@ import { BoundedCache } from "./bounded-cache";
 import type { Store } from "./db";
 import { candidates as hookCandidates, findingLine, narrowingHint, patternKey, patternLabel, summarizePatterns, type HookPattern } from "./hook-drilldown";
 import { buildHookDefinitions, hookCallFromAttrs, matcherApplies, splitHookItemName, type HookCall, type HookDefinition } from "./hooks";
-import { createToken, hashToken, hostContext, LOCAL_HOST, LOCAL_HOST_ID, type HostContext, type HostCredentials } from "./hosts";
+import { createToken, hashToken, hostContext, LOCAL_HOST, LOCAL_HOST_ID, type HostAddress, type HostContext, type HostCredentials, type HostEndpoint } from "./hosts";
 import { ListenerError } from "./listener";
 import { gitRoot, type RepoInfo } from "./repos";
 import { branchAsOf, buildSessionInfo, pathAsOf, repoAsOf, SESSION_EVENT_NAMES, type SessionInfo } from "./sessions";
@@ -53,7 +53,7 @@ export interface HandlerOptions {
   // process. Production exits so launchd starts a clean collector.
   onFatal?: (message: string) => void;
   now?: () => number;
-  tailscaleAddress?: () => string | null;
+  addresses?: () => HostAddress[];
 }
 
 export type Handler = (req: Request, server: PeerServer) => Response | undefined | Promise<Response | undefined>;
@@ -62,14 +62,18 @@ const INGEST_PATHS: Record<string, Signal> = { "/v1/logs": "logs", "/v1/traces":
 const LAST_SEEN_THROTTLE_MS = 60_000;
 const NO_STORE = { "cache-control": "no-store" };
 
-// First IPv4 address in Tailscale's 100.64.0.0/10 on this Mac's interfaces.
-export function findTailscaleAddress(): string | null {
-  for (const list of Object.values(networkInterfaces())) {
+// This Mac's IPv4 addresses a remote host can send to: Tailscale first, then private LAN.
+// Link-local is left out, a remote host cannot rely on it staying the same.
+export function findHostAddresses(nics: ReturnType<typeof networkInterfaces> = networkInterfaces()): HostAddress[] {
+  const found: HostAddress[] = [];
+  for (const [name, list] of Object.entries(nics)) {
     for (const nic of list ?? []) {
-      if (nic.family === "IPv4" && classifyPeer(nic.address) === "tailscale") return nic.address;
+      if (nic.family !== "IPv4" || nic.internal || nic.address.startsWith("169.254.")) continue;
+      const network = classifyPeer(nic.address);
+      if (network === "tailscale" || network === "lan") found.push({ network, interface: name, address: nic.address });
     }
   }
-  return null;
+  return [...found.filter((a) => a.network === "tailscale"), ...found.filter((a) => a.network === "lan")];
 }
 
 const notFound = () => new Response("Not Found", { status: 404 });
@@ -125,7 +129,7 @@ interface Recent {
 export function createHandler(opts: HandlerOptions): Handler {
   const { store, port } = opts;
   const now = opts.now ?? Date.now;
-  const tailscaleAddress = opts.tailscaleAddress ?? findTailscaleAddress;
+  const hostAddresses = opts.addresses ?? (() => findHostAddresses());
 
   // Host blocks DNS rebinding: a page on some other domain cannot point a victim's browser
   // at 127.0.0.1 and have it talk to us, because the browser still sends that domain as Host.
@@ -544,9 +548,9 @@ export function createHandler(opts: HandlerOptions): Handler {
   }
 
   function credentials(host: HostCredentials["host"], token: string, status: number) {
-    const address = tailscaleAddress();
-    const endpoint = `http://${address ?? "<THIS_MAC_TAILSCALE_IP>"}:${port}`;
-    const body: HostCredentials = { host, token, env: telemetryEnv(endpoint, `Authorization=Bearer ${token}`), tailscaleAddress: address };
+    const endpoints: HostEndpoint[] = hostAddresses().map((a) => ({ ...a, url: `http://${a.address}:${port}` }));
+    const endpoint = endpoints[0]?.url ?? `http://<THIS_MAC_IP>:${port}`;
+    const body: HostCredentials = { host, token, env: telemetryEnv(endpoint, `Authorization=Bearer ${token}`), endpoints };
     return Response.json(body, { status, headers: NO_STORE });
   }
 

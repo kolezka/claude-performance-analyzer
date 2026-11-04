@@ -1,12 +1,14 @@
 import SwiftUI
 
-// Remote machines that send telemetry to this Mac's collector over Tailscale. Tokens and env
-// blocks live only in `actions.revealed` while this tab is open; nothing here is persisted.
+// Remote machines that send telemetry to this Mac's collector over Tailscale or the LAN. Tokens
+// and env blocks live only in `actions.revealed` while this tab is open; nothing here is persisted.
 struct HostsSettingsTab: View {
     @Bindable var model: Telemetry
     @State private var actions: HostActions
     @State private var newName = ""
     @State private var copied = false
+    // Which of this Mac's addresses goes into the revealed env block.
+    @State private var endpointIndex = 0
     @State private var pendingRegenerate: TelemetryHost?
     @State private var pendingRemove: TelemetryHost?
 
@@ -44,7 +46,7 @@ struct HostsSettingsTab: View {
             } header: {
                 Text("Add a remote host")
             } footer: {
-                Text("The remote machine sends telemetry over Tailscale with its own token. With at least one host, the collector listens on all interfaces, so macOS may ask once to allow incoming connections. Only Tailscale peers with a valid token are accepted, and reads stay on this Mac.")
+                Text("The remote machine sends telemetry over Tailscale or your LAN with its own token. With at least one host, the collector listens on all interfaces, so macOS may ask once to allow incoming connections. Only Tailscale and private LAN peers with a valid token are accepted, and reads stay on this Mac.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }
@@ -54,8 +56,11 @@ struct HostsSettingsTab: View {
         // A token belongs to the collector that issued it, and is shown only while it is fresh.
         .onChange(of: model.collectorURL) { actions.collectorChanged() }
         .onDisappear { actions.tabDisappeared() }
-        // Each new reveal starts with an unused Copy button.
-        .onChange(of: actions.revealed?.token) { copied = false }
+        // Each new reveal starts with an unused Copy button and the first address.
+        .onChange(of: actions.revealed?.token) {
+            copied = false
+            endpointIndex = 0
+        }
         .confirmationDialog(
             "Regenerate the token for \(pendingRegenerate?.name ?? "")?",
             isPresented: Binding(get: { pendingRegenerate != nil }, set: { if !$0 { pendingRegenerate = nil } }),
@@ -109,23 +114,43 @@ struct HostsSettingsTab: View {
     }
 
     private func revealSection(_ credentials: HostCredentials) -> some View {
-        Section {
-            if credentials.tailscaleAddress == nil {
-                Label(
-                    "No Tailscale address found on this Mac. Replace <THIS_MAC_TAILSCALE_IP> with this Mac's Tailscale IP before pasting.",
-                    systemImage: "exclamationmark.triangle.fill"
-                )
-                .font(.caption)
-                .foregroundStyle(.orange)
+        let endpoints = credentials.endpoints
+        let endpoint = endpoints.flatMap { $0.indices.contains(endpointIndex) ? $0[endpointIndex] : nil }
+        let block = credentials.envBlock(using: endpoint)
+        return Section {
+            if let endpoints {
+                if endpoints.isEmpty {
+                    Label(
+                        "No Tailscale or LAN address found on this Mac. Replace <THIS_MAC_IP> with an address the remote machine can reach before pasting.",
+                        systemImage: "exclamationmark.triangle.fill"
+                    )
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+                } else {
+                    Picker("Reach this Mac at", selection: $endpointIndex) {
+                        ForEach(endpoints.indices, id: \.self) { i in
+                            Text(endpoints[i].label).tag(i)
+                        }
+                    }
+                    .onChange(of: endpointIndex) { copied = false }
+                    if endpoint?.isLAN == true {
+                        Label(
+                            "Over the LAN, telemetry and this token travel unencrypted. Use it only on a network you trust.",
+                            systemImage: "lock.open"
+                        )
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                    }
+                }
             }
-            Text(credentials.envBlock)
+            Text(block)
                 .font(.caption)
                 .monospaced()
                 .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
             HStack {
                 Button(copied ? "Copied" : "Copy", systemImage: copied ? "checkmark" : "doc.on.doc") {
-                    copyToPasteboard(credentials.envBlock)
+                    copyToPasteboard(block)
                     copied = true
                 }
                 Spacer()

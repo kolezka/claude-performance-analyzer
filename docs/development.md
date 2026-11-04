@@ -31,7 +31,7 @@ A `Makefile` wraps the same commands. Run `make` to list targets.
 Claude Code ──OTLP, loopback──────────▶ collector :4318 ──▶ SQLite
                                          │  (127.0.0.1 only, or
 remote machine (optional)                │   all addresses once a
-Claude Code ──OTLP, Tailscale + token───▶│   remote host exists)
+Claude Code ──OTLP, Tailscale/LAN+token─▶│   remote host exists)
                                          │
                                          ├── /api/* over loopback ──▶ menu bar app
                                          └── web dashboard over loopback
@@ -39,7 +39,7 @@ Claude Code ──OTLP, Tailscale + token───▶│   remote host exists)
 
 Claude Code exports logs, metrics and traces over OTLP. The collector decodes them, stores them in `~/.claude-telemetry/telemetry.sqlite` and serves a small JSON API. The menu bar app and the dashboard both read from that API over loopback.
 
-Without remote hosts, nothing leaves your machine. With them, each remote machine's telemetry crosses your tailnet to this Mac, authenticated by its token. Stored data and every API read stay on this Mac. Every stored row carries the host its token belongs to, and each read shows one host at a time.
+Without remote hosts, nothing leaves your machine. With them, each remote machine's telemetry crosses your tailnet or your LAN to this Mac, authenticated by its token. Stored data and every API read stay on this Mac. Every stored row carries the host its token belongs to, and each read shows one host at a time.
 
 ## Project layout
 

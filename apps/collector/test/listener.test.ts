@@ -151,7 +151,7 @@ test("adding the first host and removing the last change the real binding withou
     assets: () => new Response("asset"),
     rebind: (remote) => listener.rebind(remote),
     publish: (m) => listener.publish(m),
-    tailscaleAddress: () => null,
+    addresses: () => [],
   });
   listener = active = createListener({ port, fetch: handler });
   listener.start(store.hosts().length > 0);
