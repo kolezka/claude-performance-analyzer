@@ -49,7 +49,7 @@ struct Summary: Decodable {
     let subagents: [Stats]
 }
 
-struct LiveEvent: Decodable {
+struct LiveEvent: Decodable, Equatable {
     let tsMs: Double
     let kind: String
     let label: String
@@ -58,4 +58,7 @@ struct LiveEvent: Decodable {
     let sessionId: String?
     // Present only when the collector can resolve a detail record for this event.
     let id: Int?
+
+    // Same identity LiveFeed's rowIds uses, so pushed rows and fetched rows match up.
+    var liveKey: String { "\(tsMs)/\(sessionId ?? "")/\(kind)/\(label)" }
 }

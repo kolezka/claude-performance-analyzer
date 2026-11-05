@@ -76,6 +76,8 @@ struct PanelView: View {
                         SummaryView(
                             summary: s,
                             live: model.live,
+                            running: model.runningHooks.entries,
+                            now: model.clock,
                             onSelectItem: { kind, name in openDetail(.item(kind: kind, name: name)) },
                             onSelectEvent: { id in openDetail(.event(id: id)) }
                         )

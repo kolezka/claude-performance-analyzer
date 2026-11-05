@@ -223,6 +223,139 @@ func telemetryReply(_ req: RecordedRequest, tag: String, base: String = "/") -> 
     }
 }
 
+// MARK: - Socket frames
+
+func frameJSON(host: String = "local", events: [[String: Any]] = [], changed: Int = 0) -> String {
+    let object: [String: Any] = ["type": "events", "host": host, "events": events, "changed": changed]
+    return String(decoding: try! JSONSerialization.data(withJSONObject: object), as: UTF8.self)
+}
+
+// A pushed row: no id, since the collector broadcasts rows before they have one.
+func pushedEventJSON(_ label: String, kind: String = "hook", tsMs: Double = 5000, sessionId: String = "s1", id: Any = NSNull()) -> [String: Any] {
+    ["tsMs": tsMs, "kind": kind, "label": label, "ms": 7, "ok": true, "sessionId": sessionId, "id": id]
+}
+
+// A thread-safe switch the mock route can read while the test flips it.
+final class Flag: @unchecked Sendable {
+    private let lock = NSLock()
+    private var _value = false
+    var value: Bool {
+        get { lock.withLock { _value } }
+        set { lock.withLock { _value = newValue } }
+    }
+}
+
+// Model with an accepting socket and the panel open, waited until live and the resync has shown
+// the mock's data, so each check starts from the same settled state.
+@MainActor
+func liveModel(_ store: IsolatedDefaults, hub: FakeSocketHub = FakeSocketHub(mode: .accept), tag: String = "L") async throws -> Telemetry {
+    let model = makeModel(store, polling: true, hub: hub)
+    model.panelOpen = true
+    try await waitUntil("live") { model.connectionState == .live }
+    try await waitUntil("resync shown") { model.status?.label == tag && model.live.first?.label == tag }
+    return model
+}
+
+// MARK: - Fake socket
+
+// Scripted socket. Frames given to push() come out of receive(); close() makes the pending or
+// next receive() throw, the way a dropped connection does.
+final class FakeSocket: LiveSocketConnection, @unchecked Sendable {
+    let url: URL
+    let createdAt = Date()
+    private let refuse: Bool
+    // With holdOnCancel the model's cancel() does not fail the pending receive(); the test
+    // decides when that old receive completes, by calling close().
+    private let holdOnCancel: Bool
+    private let lock = NSLock()
+    private var queue: [String] = []
+    private var closed = false
+    private var waiter: CheckedContinuation<String, Error>?
+    private var _cancelCount = 0
+
+    init(url: URL, refuse: Bool, holdOnCancel: Bool = false) {
+        self.url = url
+        self.refuse = refuse
+        self.holdOnCancel = holdOnCancel
+    }
+
+    var cancelCount: Int { lock.withLock { _cancelCount } }
+
+    func open() async throws {
+        if refuse { throw URLError(.cannotConnectToHost) }
+    }
+
+    func receive() async throws -> String {
+        try await withCheckedThrowingContinuation { continuation in
+            lock.withLock {
+                if !queue.isEmpty {
+                    continuation.resume(returning: queue.removeFirst())
+                } else if closed {
+                    continuation.resume(throwing: URLError(.networkConnectionLost))
+                } else {
+                    waiter = continuation
+                }
+            }
+        }
+    }
+
+    func push(_ text: String) {
+        let waiting: CheckedContinuation<String, Error>? = lock.withLock {
+            if let waiter {
+                self.waiter = nil
+                return waiter
+            }
+            queue.append(text)
+            return nil
+        }
+        waiting?.resume(returning: text)
+    }
+
+    func close() {
+        let waiting: CheckedContinuation<String, Error>? = lock.withLock {
+            closed = true
+            defer { waiter = nil }
+            return waiter
+        }
+        waiting?.resume(throwing: URLError(.networkConnectionLost))
+    }
+
+    func cancel() {
+        lock.withLock { _cancelCount += 1 }
+        if !holdOnCancel { close() }
+    }
+}
+
+// Hands out FakeSockets and remembers every one, so a test can push frames or count reconnects.
+final class FakeSocketHub: @unchecked Sendable {
+    enum Mode { case refuse, accept }
+
+    private let lock = NSLock()
+    private var _mode: Mode
+    private var _sockets: [FakeSocket] = []
+    private let holdOnCancel: Bool
+
+    init(mode: Mode, holdOnCancel: Bool = false) {
+        _mode = mode
+        self.holdOnCancel = holdOnCancel
+    }
+
+    var mode: Mode {
+        get { lock.withLock { _mode } }
+        set { lock.withLock { _mode = newValue } }
+    }
+
+    var sockets: [FakeSocket] { lock.withLock { _sockets } }
+
+    var factory: LiveSocketFactory {
+        { [self] url in
+            let socket = FakeSocket(url: url, refuse: self.mode == .refuse, holdOnCancel: self.holdOnCancel)
+            self.lock.withLock { self._sockets.append(socket) }
+            return socket
+        }
+    }
+}
+
 // MARK: - Harness
 
 @MainActor
@@ -292,8 +425,18 @@ final class IsolatedDefaults {
 }
 
 @MainActor
-func makeModel(_ store: IsolatedDefaults, polling: Bool = false) -> Telemetry {
-    Telemetry(defaults: store.defaults, makeSession: mockSession(requestTimeout:), startPolling: polling)
+func makeModel(
+    _ store: IsolatedDefaults, polling: Bool = false,
+    hub: FakeSocketHub = FakeSocketHub(mode: .refuse), refreshIntervalSec: Double = Telemetry.refreshIntervalSec
+) -> Telemetry {
+    Telemetry(
+        defaults: store.defaults, makeSession: mockSession(requestTimeout:), makeSocket: hub.factory,
+        refreshIntervalSec: refreshIntervalSec, startPolling: polling)
+}
+
+// Requests the mock collector has seen for one API path.
+func requestCount(_ path: String) -> Int {
+    MockServer.current.recorded.filter { $0.path() == path }.count
 }
 
 // Stops every loop before the model is dropped, so one test's polling never leaks into the next.
@@ -1144,6 +1287,356 @@ struct TelemetryHostsTests {
                 h.check(actions.error == nil, "\(outcomeName): A-B-A error \(String(describing: actions.error))")
                 h.check(!actions.busy, "\(outcomeName): busy after A-B-A")
             }
+        }
+
+        // MARK: - Live updates
+
+        await h.run("socket URL swaps the scheme and keeps the collector path and port") {
+            let a = Telemetry.socketURL(for: URL(string: "http://127.0.0.1:4318/")!)
+            h.check(a.absoluteString == "ws://127.0.0.1:4318/ws", "got \(a)")
+            let b = Telemetry.socketURL(for: URL(string: "https://box.example:8443/collector/")!)
+            h.check(b.absoluteString == "wss://box.example:8443/collector/ws", "got \(b)")
+            let frame = try JSONDecoder().decode(LiveFrame.self, from: Data(#"{"type":"events","host":"local","events":[],"changed":3}"#.utf8))
+            h.check(frame.changed == 3 && frame.events.isEmpty, "frame decode")
+        }
+
+        await h.run("the fake socket hands frames to receive and fails on close") {
+            let hub = FakeSocketHub(mode: .accept)
+            let socket = hub.factory(URL(string: "ws://127.0.0.1:4318/ws")!)
+            try await socket.open()
+            h.check(hub.sockets.count == 1, "hub recorded \(hub.sockets.count) sockets")
+            hub.sockets[0].push("x")
+            let got = try await socket.receive()
+            h.check(got == "x", "got \(got)")
+            hub.sockets[0].close()
+            do {
+                _ = try await socket.receive()
+                h.check(false, "receive should throw after close")
+            } catch {}
+            let refusing = FakeSocketHub(mode: .refuse)
+            let refused = refusing.factory(URL(string: "ws://127.0.0.1:4318/ws")!)
+            do {
+                try await refused.open()
+                h.check(false, "open should throw in refuse mode")
+            } catch {}
+        }
+
+        await h.run("socket open resyncs once and suppresses fast polling") {
+            let store = IsolatedDefaults(); defer { store.cleanup() }
+            MockServer.current = MockServer { req in
+                req.path() == "api/hosts" ? .json(200, [localHost]) : telemetryReply(req, tag: "L")
+            }
+            let hub = FakeSocketHub(mode: .accept)
+            let model = makeModel(store, polling: true, hub: hub); defer { shutdown(model) }
+            try await waitUntil("live") { model.connectionState == .live }
+            try await Task.sleep(for: .milliseconds(300))
+            h.check(requestCount("api/status") == 2, "expected startup refresh plus resync, got \(requestCount("api/status"))")
+            try await Task.sleep(for: .milliseconds(1200))
+            h.check(requestCount("api/status") == 2, "fast polling still running: \(requestCount("api/status"))")
+        }
+
+        await h.run("socket close leaves live and the slow refresh keeps running") {
+            let store = IsolatedDefaults(); defer { store.cleanup() }
+            MockServer.current = MockServer { req in
+                req.path() == "api/hosts" ? .json(200, [localHost]) : telemetryReply(req, tag: "L")
+            }
+            let hub = FakeSocketHub(mode: .accept)
+            let model = makeModel(store, polling: true, hub: hub, refreshIntervalSec: 0.5); defer { shutdown(model) }
+            try await waitUntil("live") { model.connectionState == .live }
+            hub.mode = .refuse
+            hub.sockets.last!.close()
+            try await waitUntil("not live") { model.connectionState != .live }
+            h.check(model.connectionState == .reconnecting, "state after close: \(model.connectionState)")
+            let before = requestCount("api/status")
+            try await Task.sleep(for: .milliseconds(1200))
+            h.check(requestCount("api/status") >= before + 2, "slow refresh stopped: \(before) -> \(requestCount("api/status"))")
+        }
+
+        await h.run("reconnect backs off and resyncs on reopen") {
+            let store = IsolatedDefaults(); defer { store.cleanup() }
+            MockServer.current = MockServer { req in
+                req.path() == "api/hosts" ? .json(200, [localHost]) : telemetryReply(req, tag: "L")
+            }
+            let hub = FakeSocketHub(mode: .refuse)
+            let model = makeModel(store, polling: true, hub: hub); defer { shutdown(model) }
+            try await waitUntil("second attempt", timeout: 5) { hub.sockets.count >= 2 }
+            let gap = hub.sockets[1].createdAt.timeIntervalSince(hub.sockets[0].createdAt)
+            h.check(gap >= 0.98, "second attempt came after \(gap)s, expected at least 1s")
+            h.check(model.connectionState == .offline, "state while refused: \(model.connectionState)")
+            let before = requestCount("api/status")
+            hub.mode = .accept
+            try await waitUntil("live after accept", timeout: 10) { model.connectionState == .live }
+            try await waitUntil("resync") { requestCount("api/status") == before + 1 }
+        }
+
+        await h.run("a pushed frame for the selected host lands in live before any live request") {
+            let store = IsolatedDefaults(); defer { store.cleanup() }
+            MockServer.current = MockServer { req in
+                if req.path() == "api/hosts" { return .json(200, [localHost]) }
+                if req.path() == "api/live" { return .hold }
+                return telemetryReply(req, tag: "L")
+            }
+            let hub = FakeSocketHub(mode: .accept)
+            let model = makeModel(store, polling: true, hub: hub); defer { shutdown(model) }
+            model.panelOpen = true
+            try await waitUntil("live") { model.connectionState == .live }
+            try await waitUntil("live request held") { MockServer.current.held.contains { $0.path() == "api/live" } }
+            hub.sockets.last!.push(frameJSON(events: [pushedEventJSON("pushed")], changed: 1))
+            try await waitUntil("pushed row shown") { model.live.first?.label == "pushed" }
+            h.check(model.live.first?.id == nil, "pushed row should have no id yet")
+            h.check(model.live.count == 1, "live has \(model.live.count) rows")
+        }
+
+        await h.run("pushed rows gain their id after the coalesced refetch") {
+            let store = IsolatedDefaults(); defer { store.cleanup() }
+            let pushed = Flag()
+            MockServer.current = MockServer { req in
+                if req.path() == "api/hosts" { return .json(200, [localHost]) }
+                if req.path() == "api/live", pushed.value { return .json(200, [pushedEventJSON("pushed", id: 42)]) }
+                return telemetryReply(req, tag: "L")
+            }
+            let hub = FakeSocketHub(mode: .accept)
+            let model = try await liveModel(store, hub: hub); defer { shutdown(model) }
+            pushed.value = true
+            hub.sockets.last!.push(frameJSON(events: [pushedEventJSON("pushed")], changed: 1))
+            try await waitUntil("pushed row shown") { model.live.first?.label == "pushed" && model.live.first?.id == nil }
+            try await waitUntil("id arrives") { model.live.first?.id == 42 }
+            h.check(model.live.count == 1, "expected the refetched list to replace the pushed row, got \(model.live.count) rows")
+        }
+
+        await h.run("a frame for another host changes nothing") {
+            let store = IsolatedDefaults(); defer { store.cleanup() }
+            MockServer.current = MockServer { req in
+                req.path() == "api/hosts" ? .json(200, [localHost, hostJSON("r1", "Box")]) : telemetryReply(req, tag: "L")
+            }
+            let hub = FakeSocketHub(mode: .accept)
+            let model = try await liveModel(store, hub: hub); defer { shutdown(model) }
+            let summaries = requestCount("api/summary")
+            hub.sockets.last!.push(frameJSON(host: "r1", events: [pushedEventJSON("other")], changed: 1))
+            try await Task.sleep(for: .milliseconds(400))
+            h.check(model.live.map(\.label) == ["L"], "live changed: \(model.live.map(\.label))")
+            h.check(requestCount("api/summary") == summaries, "summary refetched for another host's frame")
+        }
+
+        await h.run("a burst of frames causes one coalesced summary refetch") {
+            let store = IsolatedDefaults(); defer { store.cleanup() }
+            MockServer.current = MockServer { req in
+                req.path() == "api/hosts" ? .json(200, [localHost]) : telemetryReply(req, tag: "L")
+            }
+            let hub = FakeSocketHub(mode: .accept)
+            let model = try await liveModel(store, hub: hub); defer { shutdown(model) }
+            let summaries = requestCount("api/summary")
+            for _ in 0..<10 {
+                hub.sockets.last!.push(frameJSON(changed: 1))
+                try await Task.sleep(for: .milliseconds(10))
+            }
+            try await Task.sleep(for: .milliseconds(800))
+            h.check(requestCount("api/summary") == summaries + 1, "expected one refetch, got \(requestCount("api/summary") - summaries)")
+        }
+
+        await h.run("a steady stream of frames refetches about once a second") {
+            let store = IsolatedDefaults(); defer { store.cleanup() }
+            MockServer.current = MockServer { req in
+                req.path() == "api/hosts" ? .json(200, [localHost]) : telemetryReply(req, tag: "L")
+            }
+            let hub = FakeSocketHub(mode: .accept)
+            let model = try await liveModel(store, hub: hub); defer { shutdown(model) }
+            let summaries = requestCount("api/summary")
+            for _ in 0..<30 {
+                hub.sockets.last!.push(frameJSON(changed: 1))
+                try await Task.sleep(for: .milliseconds(100))
+            }
+            try await Task.sleep(for: .milliseconds(500))
+            let refetches = requestCount("api/summary") - summaries
+            h.check((3...4).contains(refetches), "expected 3 or 4 refetches over 3 s, got \(refetches)")
+        }
+
+        await h.run("an empty-events frame with changed triggers a refetch") {
+            let store = IsolatedDefaults(); defer { store.cleanup() }
+            MockServer.current = MockServer { req in
+                req.path() == "api/hosts" ? .json(200, [localHost]) : telemetryReply(req, tag: "L")
+            }
+            let hub = FakeSocketHub(mode: .accept)
+            let model = try await liveModel(store, hub: hub); defer { shutdown(model) }
+            let summaries = requestCount("api/summary")
+            hub.sockets.last!.push(frameJSON(events: [], changed: 2))
+            try await waitUntil("refetch", timeout: 0.8) { requestCount("api/summary") == summaries + 1 }
+        }
+
+        await h.run("a frame after a host switch is dropped") {
+            let store = IsolatedDefaults(); defer { store.cleanup() }
+            MockServer.current = MockServer { req in
+                if req.path() == "api/hosts" { return .json(200, [localHost, hostJSON("A", "Alpha"), hostJSON("B", "Beta")]) }
+                return telemetryReply(req, tag: req.host ?? "?")
+            }
+            let hub = FakeSocketHub(mode: .accept)
+            let model = makeModel(store, polling: true, hub: hub); defer { shutdown(model) }
+            await model.refreshHosts()
+            model.selectedHostId = "A"
+            model.panelOpen = true
+            try await waitUntil("A shown") { model.connectionState == .live && model.live.first?.label == "A" }
+            model.selectedHostId = "B"
+            hub.sockets.last!.push(frameJSON(host: "A", events: [pushedEventJSON("fromA")], changed: 1))
+            try await waitUntil("B shown") { model.live.first?.label == "B" }
+            try await Task.sleep(for: .milliseconds(300))
+            h.check(!model.live.contains { $0.label == "fromA" }, "old host's frame leaked: \(model.live.map(\.label))")
+        }
+
+        await h.run("a malformed frame is ignored") {
+            let store = IsolatedDefaults(); defer { store.cleanup() }
+            MockServer.current = MockServer { req in
+                req.path() == "api/hosts" ? .json(200, [localHost]) : telemetryReply(req, tag: "L")
+            }
+            let hub = FakeSocketHub(mode: .accept)
+            let model = try await liveModel(store, hub: hub); defer { shutdown(model) }
+            hub.sockets.last!.push("not json")
+            hub.sockets.last!.push(#"{"type":"nope"}"#)
+            try await Task.sleep(for: .milliseconds(200))
+            h.check(model.connectionState == .live, "state after bad frames: \(model.connectionState)")
+            h.check(model.live.map(\.label) == ["L"], "live changed: \(model.live.map(\.label))")
+        }
+
+        await h.run("running hooks track start and complete and prune stale ones") {
+            let start = { (label: String, t: Double) in LiveEvent(tsMs: t, kind: "hook_start", label: label, ms: nil, ok: true, sessionId: "s1", id: nil) }
+            let done = { (label: String, t: Double) in LiveEvent(tsMs: t, kind: "hook", label: label, ms: 500, ok: true, sessionId: "s1", id: nil) }
+            var running = RunningHooks()
+            running.track([start("PreToolUse", 0), start("Stop", 0), done("PreToolUse", 500)])
+            h.check(running.entries.map(\.label) == ["Stop"], "got \(running.entries.map(\.label))")
+            running.prune(nowMs: 60_000)
+            h.check(!running.isEmpty, "pruned too early")
+            running.prune(nowMs: 120_001)
+            h.check(running.isEmpty, "stale entry kept")
+        }
+
+        await h.run("no ticker while the panel is closed or nothing is running") {
+            let store = IsolatedDefaults(); defer { store.cleanup() }
+            let startedMs = Date().timeIntervalSince1970 * 1000 - 1000
+            let hookStart = pushedEventJSON("PreToolUse", kind: "hook_start", tsMs: startedMs)
+            MockServer.current = MockServer { req in
+                if req.path() == "api/hosts" { return .json(200, [localHost]) }
+                // The collector's live list includes hook_start rows, so a refetch keeps the hook running.
+                if req.path() == "api/live" { return .json(200, [hookStart] + liveJSON("L")) }
+                return telemetryReply(req, tag: "L")
+            }
+            let hub = FakeSocketHub(mode: .accept)
+            let model = makeModel(store, polling: true, hub: hub); defer { shutdown(model) }
+            try await waitUntil("live") { model.connectionState == .live }
+            hub.sockets.last!.push(frameJSON(events: [hookStart], changed: 0))
+            try await waitUntil("tracked") { !model.runningHooks.isEmpty }
+            h.check(!model.isTicking, "ticker running with the panel closed")
+            model.panelOpen = true
+            try await waitUntil("ticking") { model.isTicking }
+            hub.sockets.last!.push(frameJSON(events: [pushedEventJSON("PreToolUse", kind: "hook", tsMs: startedMs + 900)], changed: 0))
+            try await waitUntil("stopped") { !model.isTicking }
+            h.check(model.runningHooks.isEmpty, "hook still running after completion")
+        }
+
+        await h.run("removed poll interval keys are cleared by reset all") {
+            let store = IsolatedDefaults(); defer { store.cleanup() }
+            h.check(Prefs.Key.retired == ["statusPollIntervalSec", "panelPollIntervalSec"], "retired keys: \(Prefs.Key.retired)")
+            store.defaults.set(2.0, forKey: "statusPollIntervalSec")
+            store.defaults.set(2.0, forKey: "panelPollIntervalSec")
+            let model = makeModel(store); defer { shutdown(model) }
+            model.resetAllSettings()
+            h.check(store.defaults.object(forKey: "statusPollIntervalSec") == nil, "status poll key kept")
+            h.check(store.defaults.object(forKey: "panelPollIntervalSec") == nil, "panel poll key kept")
+        }
+
+        // MARK: - Review fix pass
+
+        await h.run("a cancelled socket loop cannot cancel its replacement") {
+            let store = IsolatedDefaults(); defer { store.cleanup() }
+            MockServer.current = MockServer { req in
+                req.path() == "api/hosts" ? .json(200, [localHost]) : telemetryReply(req, tag: "L")
+            }
+            let hub = FakeSocketHub(mode: .accept, holdOnCancel: true)
+            let model = makeModel(store, polling: true, hub: hub); defer { shutdown(model) }
+            try await waitUntil("live") { model.connectionState == .live }
+            model.collectorURL = URL(string: "http://127.0.0.1:4319/")!
+            try await waitUntil("replacement live") { hub.sockets.count == 2 && model.connectionState == .live }
+            // The old loop's receive now completes, after the replacement has opened.
+            hub.sockets[0].close()
+            try await Task.sleep(for: .milliseconds(200))
+            h.check(hub.sockets[1].cancelCount == 0, "old loop cancelled the replacement \(hub.sockets[1].cancelCount) time(s)")
+            h.check(model.connectionState == .live, "state after old loop finished: \(model.connectionState)")
+            hub.sockets[1].push(frameJSON(events: [pushedEventJSON("viaB")], changed: 0))
+            try await waitUntil("frame via replacement") { model.live.first?.label == "viaB" }
+        }
+
+        await h.run("a cancelled refresh cannot clear the new loop's in-flight flag") {
+            let store = IsolatedDefaults(); defer { store.cleanup() }
+            MockServer.current = MockServer { req in
+                if req.path() == "api/hosts" { return .json(200, [localHost, hostJSON("A", "Alpha"), hostJSON("B", "Beta")]) }
+                if req.path() == "api/summary" { return .hold }
+                return telemetryReply(req, tag: req.host ?? "?")
+            }
+            let hub = FakeSocketHub(mode: .accept)
+            let model = makeModel(store, polling: true, hub: hub); defer { shutdown(model) }
+            await model.refreshHosts()
+            model.selectedHostId = "A"
+            model.panelOpen = true
+            try await waitUntil("A summary held") { MockServer.current.held.contains { $0.path() == "api/summary" && $0.host == "A" } }
+            model.selectedHostId = "B"
+            try await waitUntil("B summary held") { MockServer.current.held.contains { $0.path() == "api/summary" && $0.host == "B" } }
+            try await Task.sleep(for: .milliseconds(100))
+            // A dirty mark while B's refresh is in flight must queue one follow-up, not restart B's request.
+            hub.sockets.last!.push(frameJSON(host: "B", events: [], changed: 1))
+            try await Task.sleep(for: .milliseconds(600))
+            let bSummaries = MockServer.current.recorded.filter { $0.path() == "api/summary" && $0.host == "B" }.count
+            h.check(bSummaries == 1, "B's in-flight refresh was restarted: \(bSummaries) summary requests")
+        }
+
+        await h.run("a previous window's summary cannot apply after the window changes") {
+            let store = IsolatedDefaults(); defer { store.cleanup() }
+            let summaryFor = { (sessions: Int) -> [String: Any] in
+                var s = summaryJSON(events: 1)
+                var k = s["kpis"] as! [String: Any]
+                k["sessions"] = sessions
+                s["kpis"] = k
+                return s
+            }
+            MockServer.current = MockServer { req in
+                if req.path() == "api/hosts" { return .json(200, [localHost]) }
+                if req.path() == "api/summary" { return .hold }
+                return telemetryReply(req, tag: "L")
+            }
+            let minutesOf = { (req: RecordedRequest) in req.query["minutes"]?.first ?? "" }
+            let hub = FakeSocketHub(mode: .accept)
+            let model = makeModel(store, polling: true, hub: hub); defer { shutdown(model) }
+            model.panelOpen = true
+            try await waitUntil("60 min summary held") { MockServer.current.held.contains { $0.path() == "api/summary" && minutesOf($0) == "60" } }
+            model.minutes = 15
+            // The old window's answer arrives while the new window's request is still out.
+            MockServer.current.release(where: { $0.path() == "api/summary" && minutesOf($0) == "60" }) { _ in .json(200, summaryFor(60)) }
+            try await waitUntil("15 min summary held") { MockServer.current.held.contains { $0.path() == "api/summary" && minutesOf($0) == "15" } }
+            try await Task.sleep(for: .milliseconds(300))
+            h.check(model.summary == nil, "old window's summary applied: sessions \(String(describing: model.summary?.kpis.sessions))")
+            MockServer.current.release(where: { $0.path() == "api/summary" && minutesOf($0) == "15" }) { _ in .json(200, summaryFor(15)) }
+            try await waitUntil("new window shown") { model.summary?.kpis.sessions == 15 }
+        }
+
+        await h.run("an older fetched history cannot erase a newer running invocation") {
+            let start = { (t: Double) in LiveEvent(tsMs: t, kind: "hook_start", label: "PreToolUse", ms: nil, ok: true, sessionId: "s1", id: nil) }
+            let done = { (t: Double) in LiveEvent(tsMs: t, kind: "hook", label: "PreToolUse", ms: 500, ok: true, sessionId: "s1", id: nil) }
+            var running = RunningHooks()
+            running.track([start(0), done(500), start(1000)])
+            h.check(running.entries.map(\.startedMs) == [1000], "after newer start: \(running.entries.map(\.startedMs))")
+            running.track([start(0), done(500)])
+            h.check(running.entries.map(\.startedMs) == [1000], "older history erased the newer start: \(running.entries.map(\.startedMs))")
+        }
+
+        await h.run("a stale start in a frame does not start the ticker") {
+            let store = IsolatedDefaults(); defer { store.cleanup() }
+            MockServer.current = MockServer { req in
+                req.path() == "api/hosts" ? .json(200, [localHost]) : telemetryReply(req, tag: "L")
+            }
+            let hub = FakeSocketHub(mode: .accept)
+            let model = try await liveModel(store, hub: hub); defer { shutdown(model) }
+            let stale = pushedEventJSON("Old", kind: "hook_start", tsMs: Date().timeIntervalSince1970 * 1000 - 130_000)
+            hub.sockets.last!.push(frameJSON(events: [stale], changed: 0))
+            try await waitUntil("frame applied") { model.live.contains { $0.label == "Old" } }
+            h.check(model.runningHooks.isEmpty, "stale start tracked as running")
+            h.check(!model.isTicking, "ticker started for a stale start")
         }
 
         print("SUMMARY passed=\(h.passed) failed=\(h.failed)")

@@ -35,6 +35,9 @@ struct PanelHeader: View {
                     .foregroundStyle(stateColor)
                     .symbolEffect(.pulse, isActive: recentlyActive)
                 Text(stateText).contentTransition(.opacity)
+                if model.status != nil {
+                    Text("· \(connectionText)").contentTransition(.opacity)
+                }
                 if let updatedAt = model.updatedAt, model.status != nil {
                     Text("· updated \(Text(updatedAt, style: .relative)) ago")
                 }
@@ -105,6 +108,15 @@ struct PanelHeader: View {
         case "slow": "Hooks slow"
         case "idle": "Idle"
         default: "OK"
+        }
+    }
+
+    // Whether events arrive as they happen or only on the slow refresh.
+    private var connectionText: String {
+        switch model.connectionState {
+        case .live: "Live"
+        case .reconnecting: "Reconnecting"
+        case .offline: "Offline, polling"
         }
     }
 }

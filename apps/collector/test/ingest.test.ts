@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import { requestType } from "@cpa/otlp";
-import { startCollector } from "./server";
+import { otlpJson, startCollector } from "./server";
 
 const s = (v: string) => ({ stringValue: v });
 let collector: Awaited<ReturnType<typeof startCollector>>;
@@ -82,4 +82,23 @@ test("ingested logs are pushed to WebSocket clients and kept in the live backlog
 
   const backlog = await (await fetch(`${collector.url}/api/live`)).json();
   expect(backlog[0]).toMatchObject({ kind: "hook", label: "PreToolUse:Bash" });
+});
+
+test("trace and metric batches notify WebSocket clients with an empty event list", async () => {
+  const ws = new WebSocket(`ws://127.0.0.1:${collector.port}/ws`);
+  await new Promise((resolve, reject) => ((ws.onopen = resolve), (ws.onerror = reject)));
+  const frames: any[] = [];
+  ws.onmessage = (m) => frames.push(JSON.parse(String(m.data)));
+  for (const signal of ["traces", "metrics"] as const) {
+    const res = await fetch(`${collector.url}/v1/${signal}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(otlpJson(signal, `notify-${signal}`, "m")),
+    });
+    expect(res.status).toBe(200);
+  }
+  for (let i = 0; i < 20 && frames.length < 2; i++) await Bun.sleep(100);
+  ws.close();
+  expect(frames).toHaveLength(2);
+  for (const f of frames) expect(f).toEqual({ type: "events", host: "local", events: [], changed: 1 });
 });

@@ -3,6 +3,8 @@ import SwiftUI
 struct SummaryView: View {
     let summary: Summary
     let live: [LiveEvent]
+    let running: [RunningHook]
+    let now: Date
     var onSelectItem: (StatsKind, String) -> Void = { _, _ in }
     var onSelectEvent: (Int) -> Void = { _ in }
 
@@ -66,7 +68,10 @@ struct SummaryView: View {
                 )
             }
             if showLiveFeed {
-                LiveFeed(events: hideHookStartEvents ? live.filter { $0.kind != "hook_start" } : live, onSelect: onSelectEvent)
+                LiveFeed(
+                    events: hideHookStartEvents ? live.filter { $0.kind != "hook_start" } : live,
+                    running: running, now: now, onSelect: onSelectEvent
+                )
             }
         }
     }

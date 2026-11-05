@@ -6,8 +6,6 @@ enum Prefs {
     enum Key {
         static let window = "window" // pre-existing key, kept as is so there is no migration
         static let collectorURL = "collectorURL"
-        static let statusPollIntervalSec = "statusPollIntervalSec"
-        static let panelPollIntervalSec = "panelPollIntervalSec"
         static let requestTimeoutSec = "requestTimeoutSec"
         static let retryDelaySec = "retryDelaySec"
         static let enabledWindows = "enabledWindows"
@@ -35,24 +33,25 @@ enum Prefs {
         // Not a setting: the build and path the collector agent was last registered from.
         static let collectorRegistration = "collectorRegistration"
 
+        // Settings older builds wrote that nothing reads any more. Reset still clears them.
+        static let retired = ["statusPollIntervalSec", "panelPollIntervalSec"]
+
         // Everything "Reset All Settings" clears. "window" is included since it is the General
         // tab's default time window, just under its original pre-Settings name.
         static let allManaged = [
-            window, collectorURL, statusPollIntervalSec, panelPollIntervalSec, requestTimeoutSec,
+            window, collectorURL, requestTimeoutSec,
             retryDelaySec, enabledWindows, labelStyle, labelValue, offlineText, bounceIconOnSlow,
             panelWidth, showKpis, showLatencyChart, showBreakdown, showSlowest, showTotalTime,
             showLiveFeed, showWaterfall, hideHeadlessSessions, rowsPerList, liveFeedLength,
             hideHookStartEvents, hookWarnThresholdMs, animationsMode, runCollector, selectedHostId,
             // Kind pickers inside the panel's two lists, persisted since before Settings existed.
             "slowestKind", "totalTimeKind",
-        ]
+        ] + retired
     }
 
     enum Defaults {
         static let collectorURLString = "http://127.0.0.1:4318/"
         static let minutes = 60
-        static let statusPollIntervalSec = 2.0
-        static let panelPollIntervalSec = 2.0
         static let requestTimeoutSec = 2.0
         static let retryDelaySec = 2.0
         static let enabledWindowsRaw = "15,60,1440,10080"
@@ -101,7 +100,7 @@ enum Prefs {
         return stored.isEmpty ? Defaults.hostId : stored
     }
 
-    // Shared by the three 1...60s settings (status/panel poll interval, retry delay).
+    // A 1...60s setting; today only the retry delay.
     static func loadInterval(_ key: String, default def: Double, _ defaults: UserDefaults = .standard) -> Double {
         let stored = defaults.object(forKey: key) as? Double ?? def
         return clamp(stored, 1...60)

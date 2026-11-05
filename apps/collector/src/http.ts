@@ -486,6 +486,12 @@ export function createHandler(opts: HandlerOptions): Handler {
     opts.publish(JSON.stringify({ type: "events", host: hostId, events, changed: rows.length }));
   }
 
+  // Spans and metrics have no feed rows, but summaries read them, so clients still need a nudge.
+  function broadcastChanged(hostId: string, changed: number) {
+    if (changed === 0) return;
+    opts.publish(JSON.stringify({ type: "events", host: hostId, events: [], changed }));
+  }
+
   function noteSeen(hostId: string) {
     if (hostId === LOCAL_HOST_ID) return;
     const t = now();
@@ -519,11 +525,15 @@ export function createHandler(opts: HandlerOptions): Handler {
         noteSeen(auth.hostId);
         broadcast(auth.hostId, rows);
       } else if (signal === "traces") {
-        store.addSpans(parseTraces(body), auth.hostId);
+        const spans = parseTraces(body);
+        store.addSpans(spans, auth.hostId);
         noteSeen(auth.hostId);
+        broadcastChanged(auth.hostId, spans.length);
       } else {
-        store.addMetrics(parseMetrics(body), auth.hostId);
+        const metrics = parseMetrics(body);
+        store.addMetrics(metrics, auth.hostId);
         noteSeen(auth.hostId);
+        broadcastChanged(auth.hostId, metrics.length);
       }
       return Response.json({});
     } catch (err) {
