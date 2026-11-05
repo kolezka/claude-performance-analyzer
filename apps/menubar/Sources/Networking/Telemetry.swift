@@ -28,6 +28,11 @@ final class Telemetry {
     static let refreshIntervalSec = 30.0
     static let socketBackoffMinSec = 1.0
     static let socketBackoffMaxSec = 15.0
+    // A burst of pushes becomes one refetch: wait for a short quiet gap, but never longer than this.
+    static let coalesceDelayMs = 300
+    static let coalesceMaxWaitMs = 1000
+    // What /api/live returns, so a pushed feed never outgrows a fetched one.
+    static let liveFeedCapacity = 60
 
     var connectionState = LiveConnectionState.offline
     var status: Status?
@@ -141,6 +146,8 @@ final class Telemetry {
     @ObservationIgnored private var refreshAgain = false
     @ObservationIgnored private var socketTask: Task<Void, Never>?
     @ObservationIgnored private var socket: (any LiveSocketConnection)?
+    @ObservationIgnored private var coalesceTask: Task<Void, Never>?
+    @ObservationIgnored private var dirtySince: ContinuousClock.Instant?
     @ObservationIgnored private var turnsTask: Task<Void, Never>?
     @ObservationIgnored private var turnTask: Task<Void, Never>?
     @ObservationIgnored private var hostsTask: Task<Void, Never>?
@@ -179,10 +186,12 @@ final class Telemetry {
 
     func stopPolling() {
         pollingEnabled = false
-        for task in [refreshTask, hostsTask, socketTask, turnsTask, turnTask] { task?.cancel() }
+        for task in [refreshTask, hostsTask, socketTask, coalesceTask, turnsTask, turnTask] { task?.cancel() }
         refreshTask = nil
         refreshInFlight = false
         refreshAgain = false
+        coalesceTask = nil
+        dirtySince = nil
         hostsTask = nil
         socketTask = nil
         socket?.cancel()
@@ -230,10 +239,12 @@ final class Telemetry {
     // clear their state and the Details stack, then start over for the new context.
     private func invalidateTelemetry() {
         selectionGeneration += 1
-        for task in [refreshTask, turnsTask, turnTask] { task?.cancel() }
+        for task in [refreshTask, coalesceTask, turnsTask, turnTask] { task?.cancel() }
         refreshTask = nil
         refreshInFlight = false
         refreshAgain = false
+        coalesceTask = nil
+        dirtySince = nil
         turnsTask = nil
         turnTask = nil
         status = nil
@@ -443,8 +454,42 @@ final class Telemetry {
         socket = nil
     }
 
-    // Filled in by the frame handling step; for now frames are received and dropped.
-    func handleFrame(_ text: String, collector: URL) {}
+    // One pushed frame. The socket carries every host, so only the selected one gets through, and
+    // a frame from a socket opened against an earlier collector is dropped with it. Pushed rows
+    // land in the feed at once; aggregates are marked dirty and refetched together.
+    func handleFrame(_ text: String, collector: URL) {
+        guard collector == collectorURL,
+              let frame = try? JSONDecoder().decode(LiveFrame.self, from: Data(text.utf8)),
+              frame.type == "events", frame.host == selectedHostId
+        else { return }
+        if !frame.events.isEmpty {
+            let known = Set(live.map(\.liveKey))
+            let additions = frame.events.filter { !known.contains($0.liveKey) }
+            if !additions.isEmpty {
+                let merged = (additions + live).sorted { $0.tsMs > $1.tsMs }
+                withAnimation(panelAnimation()) { live = Array(merged.prefix(Self.liveFeedCapacity)) }
+                updatedAt = .now
+            }
+        }
+        if frame.changed > 0 { markDirty() }
+    }
+
+    // Debounce with a cap: refetch 300 ms after the last mark, or 1 s after the first mark in the
+    // burst, whichever comes first, so a steady stream still refreshes about once a second.
+    private func markDirty() {
+        let now = ContinuousClock.now
+        let since = dirtySince ?? now
+        dirtySince = since
+        coalesceTask?.cancel()
+        let deadline = min(now + .milliseconds(Self.coalesceDelayMs), since + .milliseconds(Self.coalesceMaxWaitMs))
+        coalesceTask = Task {
+            try? await Task.sleep(until: deadline)
+            guard !Task.isCancelled else { return }
+            dirtySince = nil
+            coalesceTask = nil
+            refreshNow()
+        }
+    }
 
     private func refreshStatus() async -> Bool {
         let context = currentContext

@@ -100,6 +100,14 @@ test.skipIf(process.platform !== "darwin")(
         "socket open resyncs once and suppresses fast polling",
         "socket close leaves live and the slow refresh keeps running",
         "reconnect backs off and resyncs on reopen",
+        "a pushed frame for the selected host lands in live before any live request",
+        "pushed rows gain their id after the coalesced refetch",
+        "a frame for another host changes nothing",
+        "a burst of frames causes one coalesced summary refetch",
+        "a steady stream of frames refetches about once a second",
+        "an empty-events frame with changed triggers a refetch",
+        "a frame after a host switch is dropped",
+        "a malformed frame is ignored",
       ];
       expect(new Set(declared).size).toBe(declared.length);
       expect([...declared].sort()).toEqual([...required].sort());
