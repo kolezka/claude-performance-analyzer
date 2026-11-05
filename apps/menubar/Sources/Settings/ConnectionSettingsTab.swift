@@ -39,13 +39,7 @@ struct ConnectionSettingsTab: View {
                     }
                 }
             }
-            Section("Polling") {
-                Stepper(value: $model.statusPollIntervalSec, in: 1...60) {
-                    Text("Status poll interval: \(Int(model.statusPollIntervalSec))s")
-                }
-                Stepper(value: $model.panelPollIntervalSec, in: 1...60) {
-                    Text("Panel poll interval: \(Int(model.panelPollIntervalSec))s")
-                }
+            Section("Requests") {
                 Stepper(value: $model.requestTimeoutSec, in: 1...30) {
                     Text("Request timeout: \(Int(model.requestTimeoutSec))s")
                 }

@@ -97,6 +97,9 @@ test.skipIf(process.platform !== "darwin")(
         "a host action from before a collector A-B-A change reveals nothing",
         "socket URL swaps the scheme and keeps the collector path and port",
         "the fake socket hands frames to receive and fails on close",
+        "socket open resyncs once and suppresses fast polling",
+        "socket close leaves live and the slow refresh keeps running",
+        "reconnect backs off and resyncs on reopen",
       ];
       expect(new Set(declared).size).toBe(declared.length);
       expect([...declared].sort()).toEqual([...required].sort());

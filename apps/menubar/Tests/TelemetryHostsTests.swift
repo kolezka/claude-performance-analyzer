@@ -378,8 +378,18 @@ final class IsolatedDefaults {
 }
 
 @MainActor
-func makeModel(_ store: IsolatedDefaults, polling: Bool = false) -> Telemetry {
-    Telemetry(defaults: store.defaults, makeSession: mockSession(requestTimeout:), startPolling: polling)
+func makeModel(
+    _ store: IsolatedDefaults, polling: Bool = false,
+    hub: FakeSocketHub = FakeSocketHub(mode: .refuse), refreshIntervalSec: Double = Telemetry.refreshIntervalSec
+) -> Telemetry {
+    Telemetry(
+        defaults: store.defaults, makeSession: mockSession(requestTimeout:), makeSocket: hub.factory,
+        refreshIntervalSec: refreshIntervalSec, startPolling: polling)
+}
+
+// Requests the mock collector has seen for one API path.
+func requestCount(_ path: String) -> Int {
+    MockServer.current.recorded.filter { $0.path() == path }.count
 }
 
 // Stops every loop before the model is dropped, so one test's polling never leaks into the next.
@@ -1233,6 +1243,54 @@ struct TelemetryHostsTests {
                 try await refused.open()
                 h.check(false, "open should throw in refuse mode")
             } catch {}
+        }
+
+        await h.run("socket open resyncs once and suppresses fast polling") {
+            let store = IsolatedDefaults(); defer { store.cleanup() }
+            MockServer.current = MockServer { req in
+                req.path() == "api/hosts" ? .json(200, [localHost]) : telemetryReply(req, tag: "L")
+            }
+            let hub = FakeSocketHub(mode: .accept)
+            let model = makeModel(store, polling: true, hub: hub); defer { shutdown(model) }
+            try await waitUntil("live") { model.connectionState == .live }
+            try await Task.sleep(for: .milliseconds(300))
+            h.check(requestCount("api/status") == 2, "expected startup refresh plus resync, got \(requestCount("api/status"))")
+            try await Task.sleep(for: .milliseconds(1200))
+            h.check(requestCount("api/status") == 2, "fast polling still running: \(requestCount("api/status"))")
+        }
+
+        await h.run("socket close leaves live and the slow refresh keeps running") {
+            let store = IsolatedDefaults(); defer { store.cleanup() }
+            MockServer.current = MockServer { req in
+                req.path() == "api/hosts" ? .json(200, [localHost]) : telemetryReply(req, tag: "L")
+            }
+            let hub = FakeSocketHub(mode: .accept)
+            let model = makeModel(store, polling: true, hub: hub, refreshIntervalSec: 0.5); defer { shutdown(model) }
+            try await waitUntil("live") { model.connectionState == .live }
+            hub.mode = .refuse
+            hub.sockets.last!.close()
+            try await waitUntil("not live") { model.connectionState != .live }
+            h.check(model.connectionState == .reconnecting, "state after close: \(model.connectionState)")
+            let before = requestCount("api/status")
+            try await Task.sleep(for: .milliseconds(1200))
+            h.check(requestCount("api/status") >= before + 2, "slow refresh stopped: \(before) -> \(requestCount("api/status"))")
+        }
+
+        await h.run("reconnect backs off and resyncs on reopen") {
+            let store = IsolatedDefaults(); defer { store.cleanup() }
+            MockServer.current = MockServer { req in
+                req.path() == "api/hosts" ? .json(200, [localHost]) : telemetryReply(req, tag: "L")
+            }
+            let hub = FakeSocketHub(mode: .refuse)
+            let model = makeModel(store, polling: true, hub: hub); defer { shutdown(model) }
+            try await waitUntil("second attempt", timeout: 5) { hub.sockets.count >= 2 }
+            let gap = hub.sockets[1].createdAt.timeIntervalSince(hub.sockets[0].createdAt)
+            h.check(gap >= 0.98, "second attempt came after \(gap)s, expected at least 1s")
+            h.check(model.connectionState == .offline, "state while refused: \(model.connectionState)")
+            let before = requestCount("api/status")
+            hub.mode = .accept
+            try await waitUntil("live after accept", timeout: 10) { model.connectionState == .live }
+            try await waitUntil("resync") { requestCount("api/status") == before + 1 }
         }
 
         print("SUMMARY passed=\(h.passed) failed=\(h.failed)")

@@ -1,7 +1,8 @@
 import SwiftUI
 
-// Polls the status label and the host list all the time, and the summary and live feed only
-// while the panel is open. Every telemetry request is scoped to the selected host.
+// Keeps one socket to the collector for pushed events, refreshes aggregates on a slow 30 s loop
+// (and on demand), and polls the host list all the time. The summary and live feed are fetched
+// only while the panel is open. Every telemetry request is scoped to the selected host.
 @MainActor
 @Observable
 final class Telemetry {
@@ -23,7 +24,12 @@ final class Telemetry {
     }
 
     static let hostsPollIntervalSec = 10.0
+    // Time-based values (idle status, the rolling window, in-progress turns) change without a push.
+    static let refreshIntervalSec = 30.0
+    static let socketBackoffMinSec = 1.0
+    static let socketBackoffMaxSec = 15.0
 
+    var connectionState = LiveConnectionState.offline
     var status: Status?
     var summary: Summary?
     var summaryError: String?
@@ -33,7 +39,7 @@ final class Telemetry {
     // set a route before the window even exists yet.
     var navigator = DetailNavigator()
     var panelOpen = false {
-        didSet { if panelOpen != oldValue { restartPanelPolling() } }
+        didSet { if panelOpen != oldValue { refreshNow() } }
     }
 
     // Panel "Turn" section state. selectedPromptId nil means "follow the newest turn";
@@ -60,7 +66,7 @@ final class Telemetry {
             defaults.set(minutes, forKey: Prefs.Key.window)
             summary = nil
             summaryError = nil
-            restartPanelPolling()
+            refreshNow()
         }
     }
 
@@ -76,20 +82,7 @@ final class Telemetry {
             hostsError = nil
             invalidateTelemetry()
             restartHostsPolling()
-        }
-    }
-    var statusPollIntervalSec: Double {
-        didSet {
-            guard statusPollIntervalSec != oldValue else { return }
-            defaults.set(statusPollIntervalSec, forKey: Prefs.Key.statusPollIntervalSec)
-            restartStatusPolling()
-        }
-    }
-    var panelPollIntervalSec: Double {
-        didSet {
-            guard panelPollIntervalSec != oldValue else { return }
-            defaults.set(panelPollIntervalSec, forKey: Prefs.Key.panelPollIntervalSec)
-            restartPanelPolling()
+            restartSocket()
         }
     }
     var requestTimeoutSec: Double {
@@ -97,8 +90,7 @@ final class Telemetry {
             guard requestTimeoutSec != oldValue else { return }
             defaults.set(requestTimeoutSec, forKey: Prefs.Key.requestTimeoutSec)
             rebuildSession()
-            restartStatusPolling()
-            restartPanelPolling()
+            refreshNow()
         }
     }
     var retryDelaySec: Double {
@@ -138,28 +130,38 @@ final class Telemetry {
 
     @ObservationIgnored private let defaults: UserDefaults
     @ObservationIgnored private let makeSession: (Double) -> URLSession
+    @ObservationIgnored private let makeSocket: LiveSocketFactory
+    @ObservationIgnored private let refreshIntervalSec: Double
     @ObservationIgnored private var session: URLSession
     @ObservationIgnored private var pollingEnabled = false
-    @ObservationIgnored private var panelTask: Task<Void, Never>?
-    @ObservationIgnored private var statusTask: Task<Void, Never>?
+    // One loop refreshes status and, with the panel open, the panel. refreshNow() restarts it; if
+    // a refresh is in flight the loop runs one more right after instead of cancelling requests.
+    @ObservationIgnored private var refreshTask: Task<Void, Never>?
+    @ObservationIgnored private var refreshInFlight = false
+    @ObservationIgnored private var refreshAgain = false
+    @ObservationIgnored private var socketTask: Task<Void, Never>?
+    @ObservationIgnored private var socket: (any LiveSocketConnection)?
     @ObservationIgnored private var turnsTask: Task<Void, Never>?
     @ObservationIgnored private var turnTask: Task<Void, Never>?
     @ObservationIgnored private var hostsTask: Task<Void, Never>?
     // Only the newest host-list request may apply, so an add's refresh is not undone by an older poll.
     @ObservationIgnored private var hostsRequestSerial = 0
 
-    // Tests inject an isolated defaults suite and a mock session, and may hold polling off.
+    // Tests inject an isolated defaults suite, a mock session and a scripted socket, and may hold
+    // networking off. startPolling keeps its name; it now starts the socket and the refresh loop.
     init(
         defaults: UserDefaults = .standard,
         makeSession: @escaping (Double) -> URLSession = Telemetry.makeSession(requestTimeout:),
+        makeSocket: @escaping LiveSocketFactory = Telemetry.makeSocket(url:),
+        refreshIntervalSec: Double = Telemetry.refreshIntervalSec,
         startPolling: Bool = true
     ) {
         self.defaults = defaults
         self.makeSession = makeSession
+        self.makeSocket = makeSocket
+        self.refreshIntervalSec = refreshIntervalSec
         minutes = defaults.object(forKey: Prefs.Key.window) as? Int ?? Prefs.Defaults.minutes
         collectorURL = Prefs.loadCollectorURL(defaults)
-        statusPollIntervalSec = Prefs.loadInterval(Prefs.Key.statusPollIntervalSec, default: Prefs.Defaults.statusPollIntervalSec, defaults)
-        panelPollIntervalSec = Prefs.loadInterval(Prefs.Key.panelPollIntervalSec, default: Prefs.Defaults.panelPollIntervalSec, defaults)
         let timeout = Prefs.loadRequestTimeout(defaults)
         requestTimeoutSec = timeout
         retryDelaySec = Prefs.loadInterval(Prefs.Key.retryDelaySec, default: Prefs.Defaults.retryDelaySec, defaults)
@@ -170,32 +172,34 @@ final class Telemetry {
 
     func startPolling() {
         pollingEnabled = true
-        restartStatusPolling()
         restartHostsPolling()
-        restartPanelPolling()
+        refreshNow()
+        restartSocket()
     }
 
     func stopPolling() {
         pollingEnabled = false
-        for task in [statusTask, hostsTask, panelTask, turnsTask, turnTask] { task?.cancel() }
-        statusTask = nil
+        for task in [refreshTask, hostsTask, socketTask, turnsTask, turnTask] { task?.cancel() }
+        refreshTask = nil
+        refreshInFlight = false
+        refreshAgain = false
         hostsTask = nil
-        panelTask = nil
+        socketTask = nil
+        socket?.cancel()
+        socket = nil
+        connectionState = .offline
         turnsTask = nil
         turnTask = nil
     }
 
     // Skips the retry-delay wait after a failure.
     func retry() {
-        restartStatusPolling()
-        restartPanelPolling()
+        refreshNow()
     }
 
     func resetAllSettings() {
         for key in Prefs.Key.allManaged { defaults.removeObject(forKey: key) }
         collectorURL = Prefs.defaultCollectorURL
-        statusPollIntervalSec = Prefs.Defaults.statusPollIntervalSec
-        panelPollIntervalSec = Prefs.Defaults.panelPollIntervalSec
         requestTimeoutSec = Prefs.Defaults.requestTimeoutSec
         retryDelaySec = Prefs.Defaults.retryDelaySec
         minutes = Prefs.Defaults.minutes
@@ -209,6 +213,11 @@ final class Telemetry {
         return URLSession(configuration: config)
     }
 
+    // The socket has its own session: the request timeout setting is for one-shot requests.
+    nonisolated static func makeSocket(url: URL) -> any LiveSocketConnection {
+        URLSessionLiveSocket(url: url, session: makeSession(requestTimeout: Prefs.Defaults.requestTimeoutSec))
+    }
+
     private func rebuildSession() {
         session = makeSession(requestTimeoutSec)
     }
@@ -217,13 +226,14 @@ final class Telemetry {
         RequestContext(collectorURL: collectorURL, hostId: selectedHostId, generation: selectionGeneration)
     }
 
-    // Everything shown belongs to the old host or collector: cancel the four telemetry tasks,
+    // Everything shown belongs to the old host or collector: cancel the telemetry tasks,
     // clear their state and the Details stack, then start over for the new context.
     private func invalidateTelemetry() {
         selectionGeneration += 1
-        for task in [statusTask, panelTask, turnsTask, turnTask] { task?.cancel() }
-        statusTask = nil
-        panelTask = nil
+        for task in [refreshTask, turnsTask, turnTask] { task?.cancel() }
+        refreshTask = nil
+        refreshInFlight = false
+        refreshAgain = false
         turnsTask = nil
         turnTask = nil
         status = nil
@@ -237,8 +247,7 @@ final class Telemetry {
         turnDetail = nil
         turnDetailError = nil
         navigator.stack = []
-        restartStatusPolling()
-        restartPanelPolling()
+        refreshNow()
     }
 
     // Runs even while the panel is closed, so a host removed elsewhere is noticed and the
@@ -352,19 +361,90 @@ final class Telemetry {
         return components.url!
     }
 
-    // Status runs on its own loop so slow summary requests never delay the label.
-    // Restarting cancels the old loop, so its late response cannot undo a newer one.
-    private func restartStatusPolling() {
-        statusTask?.cancel()
-        statusTask = nil
+    // Refreshes everything the current context shows right away and restarts the slow loop.
+    // A refresh already in flight is left to finish; one more follows it.
+    func refreshNow() {
         guard pollingEnabled else { return }
-        statusTask = Task {
+        if refreshInFlight {
+            refreshAgain = true
+        } else {
+            restartRefreshLoop()
+        }
+    }
+
+    private func restartRefreshLoop() {
+        refreshTask?.cancel()
+        refreshAgain = false
+        refreshTask = Task {
             while !Task.isCancelled {
-                let ok = await refreshStatus()
-                try? await Task.sleep(for: .seconds(Prefs.clamp(ok ? statusPollIntervalSec : retryDelaySec, 1...60)))
+                refreshInFlight = true
+                let ok = await refreshAll()
+                refreshInFlight = false
+                if Task.isCancelled { return }
+                if refreshAgain {
+                    refreshAgain = false
+                    continue
+                }
+                try? await Task.sleep(for: .seconds(ok ? refreshIntervalSec : Prefs.clamp(retryDelaySec, 1...60)))
             }
         }
     }
+
+    // Status and panel run side by side, so a slow summary never delays the label.
+    private func refreshAll() async -> Bool {
+        guard panelOpen else { return await refreshStatus() }
+        async let statusOk = refreshStatus()
+        async let panelOk = refreshPanel()
+        let (s, p) = await (statusOk, panelOk)
+        return s && p
+    }
+
+    // One socket for the app's lifetime, re-created on a collector change. Pushed frames feed
+    // handleFrame; every successful open resyncs, since frames only cover what came after it.
+    private func restartSocket() {
+        socketTask?.cancel()
+        socketTask = nil
+        socket?.cancel()
+        socket = nil
+        connectionState = .offline
+        guard pollingEnabled else { return }
+        let base = collectorURL
+        socketTask = Task { await runSocket(base: base) }
+    }
+
+    private func runSocket(base: URL) async {
+        let url = Self.socketURL(for: base)
+        var backoff = Self.socketBackoffMinSec
+        var hadLive = false
+        while !Task.isCancelled {
+            let connection = makeSocket(url)
+            socket = connection
+            do {
+                try await connection.open()
+                guard !Task.isCancelled else { break }
+                backoff = Self.socketBackoffMinSec
+                hadLive = true
+                connectionState = .live
+                refreshNow()
+                while !Task.isCancelled {
+                    let text = try await connection.receive()
+                    handleFrame(text, collector: base)
+                }
+            } catch {
+                guard !Task.isCancelled else { break }
+                connectionState = hadLive ? .reconnecting : .offline
+            }
+            connection.cancel()
+            socket = nil
+            try? await Task.sleep(for: .seconds(backoff))
+            backoff = min(backoff * 2, Self.socketBackoffMaxSec)
+        }
+        socket?.cancel()
+        socket = nil
+    }
+
+    // Filled in by the frame handling step; for now frames are received and dropped.
+    func handleFrame(_ text: String, collector: URL) {}
 
     private func refreshStatus() async -> Bool {
         let context = currentContext
@@ -377,20 +457,6 @@ final class Telemetry {
             guard !Task.isCancelled, !Self.isStale(error), context == currentContext else { return true }
             withAnimation(panelAnimation()) { status = nil }
             return false
-        }
-    }
-
-    // One panel loop at a time: closing the panel or switching window cancels the old one,
-    // so a late response can never overwrite newer data.
-    private func restartPanelPolling() {
-        panelTask?.cancel()
-        panelTask = nil
-        guard panelOpen, pollingEnabled else { return }
-        panelTask = Task {
-            while !Task.isCancelled {
-                let ok = await refreshPanel()
-                try? await Task.sleep(for: .seconds(Prefs.clamp(ok ? panelPollIntervalSec : retryDelaySec, 1...60)))
-            }
         }
     }
 
