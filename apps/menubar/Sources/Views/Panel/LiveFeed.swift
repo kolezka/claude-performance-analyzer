@@ -3,13 +3,17 @@ import SwiftUI
 struct LiveFeed: View {
     // The whole feed, newest first. Ids are counted over all of it, then only the top rows show.
     let events: [LiveEvent]
+    // Hooks still running, shown above the rows with an elapsed time read against `now`.
+    let running: [RunningHook]
+    let now: Date
     var onSelect: (Int) -> Void = { _ in }
     @AppStorage(Prefs.Key.liveFeedLength) private var liveFeedLength = Prefs.Defaults.liveFeedLength
 
     var body: some View {
-        if !events.isEmpty {
+        if !events.isEmpty || !running.isEmpty {
             VStack(alignment: .leading, spacing: 4) {
                 SectionTitle("Live")
+                ForEach(running) { hook in runningRow(hook) }
                 let ids = rowIds(events.map(\.liveKey))
                 ForEach(Array(zip(ids, events).prefix(Prefs.clamp(liveFeedLength, 5...15))), id: \.0) { _, e in
                     row(e)
@@ -17,6 +21,21 @@ struct LiveFeed: View {
             }
             .clipped()
         }
+    }
+
+    // The counter is information, not decoration, so it updates even with animations off.
+    private func runningRow(_ hook: RunningHook) -> some View {
+        HStack(spacing: 6) {
+            ProgressView().controlSize(.mini).frame(width: 16)
+            Image(systemName: Self.symbol("hook")).foregroundStyle(.secondary).frame(width: 16)
+            Text(hook.label).lineLimit(1).truncationMode(.middle)
+            Text("running").foregroundStyle(.tertiary)
+            Spacer(minLength: 8)
+            Text(fmtMs(max(0, now.timeIntervalSince1970 * 1000 - hook.startedMs))).foregroundStyle(.secondary)
+        }
+        .font(.callout)
+        .monospacedDigit()
+        .help("\(hook.label) started and has not finished yet")
     }
 
     @ViewBuilder

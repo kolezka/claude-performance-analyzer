@@ -5,7 +5,7 @@ struct SkeletonView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        SummaryView(summary: .placeholder, live: LiveEvent.placeholders)
+        SummaryView(summary: .placeholder, live: LiveEvent.placeholders, running: [], now: .now)
             .redacted(reason: .placeholder)
             .allowsHitTesting(false)
             .phaseAnimator(reduceMotion ? [1.0] : [1.0, 0.45]) { view, opacity in
