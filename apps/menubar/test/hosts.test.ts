@@ -96,6 +96,7 @@ test.skipIf(process.platform !== "darwin")(
         "an old host action cannot clear a newer action's busy state",
         "a host action from before a collector A-B-A change reveals nothing",
         "socket URL swaps the scheme and keeps the collector path and port",
+        "the fake socket hands frames to receive and fails on close",
       ];
       expect(new Set(declared).size).toBe(declared.length);
       expect([...declared].sort()).toEqual([...required].sort());

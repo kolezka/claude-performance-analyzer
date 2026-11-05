@@ -223,6 +223,92 @@ func telemetryReply(_ req: RecordedRequest, tag: String, base: String = "/") -> 
     }
 }
 
+// MARK: - Fake socket
+
+// Scripted socket. Frames given to push() come out of receive(); close() makes the pending or
+// next receive() throw, the way a dropped connection does.
+final class FakeSocket: LiveSocketConnection, @unchecked Sendable {
+    let url: URL
+    let createdAt = Date()
+    private let refuse: Bool
+    private let lock = NSLock()
+    private var queue: [String] = []
+    private var closed = false
+    private var waiter: CheckedContinuation<String, Error>?
+
+    init(url: URL, refuse: Bool) {
+        self.url = url
+        self.refuse = refuse
+    }
+
+    func open() async throws {
+        if refuse { throw URLError(.cannotConnectToHost) }
+    }
+
+    func receive() async throws -> String {
+        try await withCheckedThrowingContinuation { continuation in
+            lock.withLock {
+                if !queue.isEmpty {
+                    continuation.resume(returning: queue.removeFirst())
+                } else if closed {
+                    continuation.resume(throwing: URLError(.networkConnectionLost))
+                } else {
+                    waiter = continuation
+                }
+            }
+        }
+    }
+
+    func push(_ text: String) {
+        let waiting: CheckedContinuation<String, Error>? = lock.withLock {
+            if let waiter {
+                self.waiter = nil
+                return waiter
+            }
+            queue.append(text)
+            return nil
+        }
+        waiting?.resume(returning: text)
+    }
+
+    func close() {
+        let waiting: CheckedContinuation<String, Error>? = lock.withLock {
+            closed = true
+            defer { waiter = nil }
+            return waiter
+        }
+        waiting?.resume(throwing: URLError(.networkConnectionLost))
+    }
+
+    func cancel() { close() }
+}
+
+// Hands out FakeSockets and remembers every one, so a test can push frames or count reconnects.
+final class FakeSocketHub: @unchecked Sendable {
+    enum Mode { case refuse, accept }
+
+    private let lock = NSLock()
+    private var _mode: Mode
+    private var _sockets: [FakeSocket] = []
+
+    init(mode: Mode) { _mode = mode }
+
+    var mode: Mode {
+        get { lock.withLock { _mode } }
+        set { lock.withLock { _mode = newValue } }
+    }
+
+    var sockets: [FakeSocket] { lock.withLock { _sockets } }
+
+    var factory: LiveSocketFactory {
+        { [self] url in
+            let socket = FakeSocket(url: url, refuse: self.mode == .refuse)
+            self.lock.withLock { self._sockets.append(socket) }
+            return socket
+        }
+    }
+}
+
 // MARK: - Harness
 
 @MainActor
@@ -1126,6 +1212,27 @@ struct TelemetryHostsTests {
             h.check(b.absoluteString == "wss://box.example:8443/collector/ws", "got \(b)")
             let frame = try JSONDecoder().decode(LiveFrame.self, from: Data(#"{"type":"events","host":"local","events":[],"changed":3}"#.utf8))
             h.check(frame.changed == 3 && frame.events.isEmpty, "frame decode")
+        }
+
+        await h.run("the fake socket hands frames to receive and fails on close") {
+            let hub = FakeSocketHub(mode: .accept)
+            let socket = hub.factory(URL(string: "ws://127.0.0.1:4318/ws")!)
+            try await socket.open()
+            h.check(hub.sockets.count == 1, "hub recorded \(hub.sockets.count) sockets")
+            hub.sockets[0].push("x")
+            let got = try await socket.receive()
+            h.check(got == "x", "got \(got)")
+            hub.sockets[0].close()
+            do {
+                _ = try await socket.receive()
+                h.check(false, "receive should throw after close")
+            } catch {}
+            let refusing = FakeSocketHub(mode: .refuse)
+            let refused = refusing.factory(URL(string: "ws://127.0.0.1:4318/ws")!)
+            do {
+                try await refused.open()
+                h.check(false, "open should throw in refuse mode")
+            } catch {}
         }
 
         print("SUMMARY passed=\(h.passed) failed=\(h.failed)")
