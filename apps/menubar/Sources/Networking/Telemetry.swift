@@ -151,6 +151,7 @@ final class Telemetry {
     // One loop refreshes status and, with the panel open, the panel. refreshNow() restarts it; if
     // a refresh is in flight the loop runs one more right after instead of cancelling requests.
     @ObservationIgnored private var refreshTask: Task<Void, Never>?
+    @ObservationIgnored private var refreshGeneration = 0
     @ObservationIgnored private var refreshInFlight = false
     @ObservationIgnored private var refreshAgain = false
     @ObservationIgnored private var socketTask: Task<Void, Never>?
@@ -400,12 +401,15 @@ final class Telemetry {
     private func restartRefreshLoop() {
         refreshTask?.cancel()
         refreshAgain = false
+        refreshGeneration += 1
+        let generation = refreshGeneration
         refreshTask = Task {
             while !Task.isCancelled {
                 refreshInFlight = true
                 let ok = await refreshAll()
+                // A loop replaced while it waited must not touch the flags the new loop relies on.
+                guard generation == refreshGeneration, !Task.isCancelled else { return }
                 refreshInFlight = false
-                if Task.isCancelled { return }
                 if refreshAgain {
                     refreshAgain = false
                     continue
@@ -441,31 +445,34 @@ final class Telemetry {
         let url = Self.socketURL(for: base)
         var backoff = Self.socketBackoffMinSec
         var hadLive = false
+        var connection: (any LiveSocketConnection)?
         while !Task.isCancelled {
-            let connection = makeSocket(url)
-            socket = connection
+            let fresh = makeSocket(url)
+            connection = fresh
+            socket = fresh
             do {
-                try await connection.open()
+                try await fresh.open()
                 guard !Task.isCancelled else { break }
                 backoff = Self.socketBackoffMinSec
                 hadLive = true
                 connectionState = .live
                 refreshNow()
                 while !Task.isCancelled {
-                    let text = try await connection.receive()
+                    let text = try await fresh.receive()
                     handleFrame(text, collector: base)
                 }
             } catch {
                 guard !Task.isCancelled else { break }
                 connectionState = hadLive ? .reconnecting : .offline
             }
-            connection.cancel()
-            socket = nil
+            fresh.cancel()
+            if socket === fresh { socket = nil }
             try? await Task.sleep(for: .seconds(backoff))
             backoff = min(backoff * 2, Self.socketBackoffMaxSec)
         }
-        socket?.cancel()
-        socket = nil
+        // Only this loop's own connection. A replacement loop may own `socket` by now.
+        connection?.cancel()
+        if let connection, socket === connection { socket = nil }
     }
 
     // One pushed frame. The socket carries every host, so only the selected one gets through, and
@@ -485,6 +492,7 @@ final class Telemetry {
                 updatedAt = .now
             }
             runningHooks.track(frame.events.sorted { $0.tsMs < $1.tsMs })
+            runningHooks.prune(nowMs: Date.now.timeIntervalSince1970 * 1000)
             updateTicker()
         }
         if frame.changed > 0 { markDirty() }
@@ -543,10 +551,13 @@ final class Telemetry {
 
     private func refreshPanel() async -> Bool {
         let context = currentContext
+        // A window change queues a follow-up instead of cancelling, so the answer must still be
+        // for the window the user is looking at when it lands.
+        let windowMinutes = minutes
         do {
-            let newSummary: Summary = try await get("api/summary", [URLQueryItem(name: "minutes", value: String(minutes))], context: context)
+            let newSummary: Summary = try await get("api/summary", [URLQueryItem(name: "minutes", value: String(windowMinutes))], context: context)
             let newLive: [LiveEvent]? = try? await get("api/live", context: context)
-            guard !Task.isCancelled, context == currentContext else { return true }
+            guard !Task.isCancelled, context == currentContext, windowMinutes == minutes else { return true }
             // Animating here lets numbers roll, rows slide and charts morph on every refresh.
             withAnimation(panelAnimation()) {
                 summary = newSummary
@@ -556,6 +567,7 @@ final class Telemetry {
             // The fetched list may predate a pushed completion; track() keeps that completion.
             if let newLive {
                 runningHooks.track(newLive.reversed())
+                runningHooks.prune(nowMs: Date.now.timeIntervalSince1970 * 1000)
                 updateTicker()
             }
             updatedAt = .now

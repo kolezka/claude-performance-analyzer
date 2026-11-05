@@ -111,6 +111,11 @@ test.skipIf(process.platform !== "darwin")(
         "running hooks track start and complete and prune stale ones",
         "no ticker while the panel is closed or nothing is running",
         "removed poll interval keys are cleared by reset all",
+        "a cancelled socket loop cannot cancel its replacement",
+        "a cancelled refresh cannot clear the new loop's in-flight flag",
+        "a previous window's summary cannot apply after the window changes",
+        "an older fetched history cannot erase a newer running invocation",
+        "a stale start in a frame does not start the ticker",
       ];
       expect(new Set(declared).size).toBe(declared.length);
       expect([...declared].sort()).toEqual([...required].sort());

@@ -19,18 +19,20 @@ struct RunningHooks: Equatable {
 
     var isEmpty: Bool { entries.isEmpty }
 
-    // Events in chronological order: a start inserts or replaces by id, a completion removes.
+    // Events in any order, replayed lists included: a start only replaces an older start, and a
+    // completion only removes a start that happened before it, so stale history changes nothing.
     mutating func track(_ events: [LiveEvent]) {
         for event in events {
             let hook = RunningHook(sessionId: event.sessionId, label: event.label, startedMs: event.tsMs)
             switch event.kind {
             case "hook_start":
                 if let done = completedMs[hook.id], done >= hook.startedMs { continue }
+                if let current = entries.first(where: { $0.id == hook.id }), current.startedMs >= hook.startedMs { continue }
                 entries.removeAll { $0.id == hook.id }
                 entries.append(hook)
             case "hook":
                 completedMs[hook.id] = max(completedMs[hook.id] ?? 0, event.tsMs)
-                entries.removeAll { $0.id == hook.id }
+                entries.removeAll { $0.id == hook.id && $0.startedMs <= event.tsMs }
             default:
                 break
             }
