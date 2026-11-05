@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { openStore } from "../src/db";
+import { eventsByNameForSessionsSql, openStore } from "../src/db";
 
 function store() {
   const dir = mkdtempSync(join(tmpdir(), "cc-db-"));
@@ -66,4 +66,25 @@ test("sessionEventsByNames restricts the session query to the given event names"
 
   const rows = s.sessionEventsByNames("s1", ["tool_result", "user_prompt"]);
   expect(rows.map((r) => r.name).sort()).toEqual(["tool_result", "user_prompt"]);
+});
+
+test("eventsByNameForSessions uses the session index and returns rows in time order", () => {
+  const s = store();
+  const now = Date.now();
+  s.addEvents([
+    { tsMs: now + 2, name: "hook_registered", sessionId: "s1", promptId: null, attrs: { hook_event: "Stop" } },
+    { tsMs: now + 1, name: "hook_registered", sessionId: "s2", promptId: null, attrs: { hook_event: "Stop" } },
+    { tsMs: now + 3, name: "hook_registered", sessionId: "s1", promptId: null, attrs: { hook_event: "PreToolUse" } },
+    { tsMs: now, name: "tool_result", sessionId: "s1", promptId: null, attrs: {} },
+    { tsMs: now + 4, name: "hook_registered", sessionId: "s3", promptId: null, attrs: {} },
+  ]);
+  const rows = s.eventsByNameForSessions("hook_registered", ["s1", "s2"]);
+  expect(rows.map((r) => [r.sessionId, r.tsMs - now])).toEqual([["s2", 1], ["s1", 2], ["s1", 3]]);
+
+  // Ordering by time in SQL made the planner walk the host's whole time index: 2.7 s on a
+  // 2 million row database. The session index answers in milliseconds; sort the few rows in code.
+  const plan = s.db.query(`EXPLAIN QUERY PLAN ${eventsByNameForSessionsSql(2)}`).all("local", "hook_registered", "s1", "s2") as { detail: string }[];
+  const details = plan.map((p) => p.detail).join("\n");
+  expect(details).toContain("events_host_session");
+  expect(details).not.toContain("events_host_ts");
 });

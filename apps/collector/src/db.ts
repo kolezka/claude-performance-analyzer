@@ -30,6 +30,14 @@ function migrate(db: Database) {
   })();
 }
 
+// Exported so a test can ask the planner how it answers this; binds host, name, then the ids.
+// No ORDER BY on purpose: with it, SQLite walks the host's whole time index instead of the
+// session index (2.7 s against 2 million rows). The caller sorts the few rows that come back.
+export function eventsByNameForSessionsSql(sessionCount: number): string {
+  const placeholders = Array.from({ length: sessionCount }, () => "?").join(",");
+  return `SELECT rowid AS id, ts_ms, name, session_id, prompt_id, attrs FROM events WHERE host_id = ? AND name = ? AND session_id IN (${placeholders})`;
+}
+
 export function openStore(path: string) {
   const db = new Database(path, { create: true });
   db.run("PRAGMA journal_mode = WAL");
@@ -182,11 +190,11 @@ export function openStore(path: string) {
     // session start, which can be well before the window an /api/item query is asking about.
     eventsByNameForSessions(name: string, sessionIds: string[], hostId: string = LOCAL_HOST_ID): EventRow[] {
       if (sessionIds.length === 0) return [];
-      const placeholders = sessionIds.map(() => "?").join(",");
       return db
-        .query(`SELECT ${EVENT_COLUMNS} FROM events WHERE host_id = ? AND name = ? AND session_id IN (${placeholders}) ORDER BY ts_ms`)
+        .query(eventsByNameForSessionsSql(sessionIds.length))
         .all(hostId, name, ...sessionIds)
-        .map(eventRow);
+        .map(eventRow)
+        .sort((a, b) => a.tsMs - b.tsMs);
     },
     spans(sinceMs: number, hostId: string = LOCAL_HOST_ID): SpanRow[] {
       return db
