@@ -25,7 +25,8 @@ final class Telemetry {
 
     static let hostsPollIntervalSec = 10.0
     // Time-based values (idle status, the rolling window, in-progress turns) change without a push.
-    static let refreshIntervalSec = 30.0
+    // nonisolated: it is an init default argument, which Swift evaluates outside the actor.
+    nonisolated static let refreshIntervalSec = 30.0
     static let socketBackoffMinSec = 1.0
     static let socketBackoffMaxSec = 15.0
     // A burst of pushes becomes one refetch: wait for a short quiet gap, but never longer than this.
@@ -170,7 +171,7 @@ final class Telemetry {
     init(
         defaults: UserDefaults = .standard,
         makeSession: @escaping (Double) -> URLSession = Telemetry.makeSession(requestTimeout:),
-        makeSocket: @escaping LiveSocketFactory = Telemetry.makeSocket(url:),
+        makeSocket: @escaping LiveSocketFactory = { Telemetry.makeSocket(url: $0) },
         refreshIntervalSec: Double = Telemetry.refreshIntervalSec,
         startPolling: Bool = true
     ) {
