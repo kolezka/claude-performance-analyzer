@@ -1453,6 +1453,41 @@ struct TelemetryHostsTests {
             h.check(model.live.map(\.label) == ["L"], "live changed: \(model.live.map(\.label))")
         }
 
+        await h.run("running hooks track start and complete and prune stale ones") {
+            let start = { (label: String, t: Double) in LiveEvent(tsMs: t, kind: "hook_start", label: label, ms: nil, ok: true, sessionId: "s1", id: nil) }
+            let done = { (label: String, t: Double) in LiveEvent(tsMs: t, kind: "hook", label: label, ms: 500, ok: true, sessionId: "s1", id: nil) }
+            var running = RunningHooks()
+            running.track([start("PreToolUse", 0), start("Stop", 0), done("PreToolUse", 500)])
+            h.check(running.entries.map(\.label) == ["Stop"], "got \(running.entries.map(\.label))")
+            running.prune(nowMs: 60_000)
+            h.check(!running.isEmpty, "pruned too early")
+            running.prune(nowMs: 120_001)
+            h.check(running.isEmpty, "stale entry kept")
+        }
+
+        await h.run("no ticker while the panel is closed or nothing is running") {
+            let store = IsolatedDefaults(); defer { store.cleanup() }
+            let startedMs = Date().timeIntervalSince1970 * 1000 - 1000
+            let hookStart = pushedEventJSON("PreToolUse", kind: "hook_start", tsMs: startedMs)
+            MockServer.current = MockServer { req in
+                if req.path() == "api/hosts" { return .json(200, [localHost]) }
+                // The collector's live list includes hook_start rows, so a refetch keeps the hook running.
+                if req.path() == "api/live" { return .json(200, [hookStart] + liveJSON("L")) }
+                return telemetryReply(req, tag: "L")
+            }
+            let hub = FakeSocketHub(mode: .accept)
+            let model = makeModel(store, polling: true, hub: hub); defer { shutdown(model) }
+            try await waitUntil("live") { model.connectionState == .live }
+            hub.sockets.last!.push(frameJSON(events: [hookStart], changed: 0))
+            try await waitUntil("tracked") { !model.runningHooks.isEmpty }
+            h.check(!model.isTicking, "ticker running with the panel closed")
+            model.panelOpen = true
+            try await waitUntil("ticking") { model.isTicking }
+            hub.sockets.last!.push(frameJSON(events: [pushedEventJSON("PreToolUse", kind: "hook", tsMs: startedMs + 900)], changed: 0))
+            try await waitUntil("stopped") { !model.isTicking }
+            h.check(model.runningHooks.isEmpty, "hook still running after completion")
+        }
+
         print("SUMMARY passed=\(h.passed) failed=\(h.failed)")
         exit(h.failed == 0 ? 0 : 1)
     }

@@ -35,6 +35,11 @@ final class Telemetry {
     static let liveFeedCapacity = 60
 
     var connectionState = LiveConnectionState.offline
+    // Hooks in flight for the selected host, and a clock the panel reads for their elapsed time.
+    // The clock only advances while the panel is open and something is running.
+    var runningHooks = RunningHooks()
+    var clock = Date.now
+    var isTicking: Bool { tickerTask != nil }
     var status: Status?
     var summary: Summary?
     var summaryError: String?
@@ -44,7 +49,11 @@ final class Telemetry {
     // set a route before the window even exists yet.
     var navigator = DetailNavigator()
     var panelOpen = false {
-        didSet { if panelOpen != oldValue { refreshNow() } }
+        didSet {
+            guard panelOpen != oldValue else { return }
+            refreshNow()
+            updateTicker()
+        }
     }
 
     // Panel "Turn" section state. selectedPromptId nil means "follow the newest turn";
@@ -148,6 +157,7 @@ final class Telemetry {
     @ObservationIgnored private var socket: (any LiveSocketConnection)?
     @ObservationIgnored private var coalesceTask: Task<Void, Never>?
     @ObservationIgnored private var dirtySince: ContinuousClock.Instant?
+    @ObservationIgnored private var tickerTask: Task<Void, Never>?
     @ObservationIgnored private var turnsTask: Task<Void, Never>?
     @ObservationIgnored private var turnTask: Task<Void, Never>?
     @ObservationIgnored private var hostsTask: Task<Void, Never>?
@@ -186,12 +196,14 @@ final class Telemetry {
 
     func stopPolling() {
         pollingEnabled = false
-        for task in [refreshTask, hostsTask, socketTask, coalesceTask, turnsTask, turnTask] { task?.cancel() }
+        for task in [refreshTask, hostsTask, socketTask, coalesceTask, tickerTask, turnsTask, turnTask] { task?.cancel() }
         refreshTask = nil
         refreshInFlight = false
         refreshAgain = false
         coalesceTask = nil
         dirtySince = nil
+        tickerTask = nil
+        runningHooks = RunningHooks()
         hostsTask = nil
         socketTask = nil
         socket?.cancel()
@@ -239,12 +251,14 @@ final class Telemetry {
     // clear their state and the Details stack, then start over for the new context.
     private func invalidateTelemetry() {
         selectionGeneration += 1
-        for task in [refreshTask, coalesceTask, turnsTask, turnTask] { task?.cancel() }
+        for task in [refreshTask, coalesceTask, tickerTask, turnsTask, turnTask] { task?.cancel() }
         refreshTask = nil
         refreshInFlight = false
         refreshAgain = false
         coalesceTask = nil
         dirtySince = nil
+        tickerTask = nil
+        runningHooks = RunningHooks()
         turnsTask = nil
         turnTask = nil
         status = nil
@@ -470,8 +484,30 @@ final class Telemetry {
                 withAnimation(panelAnimation()) { live = Array(merged.prefix(Self.liveFeedCapacity)) }
                 updatedAt = .now
             }
+            runningHooks.track(frame.events.sorted { $0.tsMs < $1.tsMs })
+            updateTicker()
         }
         if frame.changed > 0 { markDirty() }
+    }
+
+    // Ticks at 4 Hz while the panel is open and a hook is running, and not at all otherwise.
+    private func updateTicker() {
+        let wanted = panelOpen && !runningHooks.isEmpty
+        if wanted, tickerTask == nil {
+            tickerTask = Task {
+                while !Task.isCancelled {
+                    try? await Task.sleep(for: .milliseconds(250))
+                    if Task.isCancelled { return }
+                    clock = .now
+                    runningHooks.prune(nowMs: clock.timeIntervalSince1970 * 1000)
+                    if runningHooks.isEmpty { break }
+                }
+                tickerTask = nil
+            }
+        } else if !wanted, let running = tickerTask {
+            running.cancel()
+            tickerTask = nil
+        }
     }
 
     // Debounce with a cap: refetch 300 ms after the last mark, or 1 s after the first mark in the
@@ -516,6 +552,11 @@ final class Telemetry {
                 summary = newSummary
                 summaryError = nil
                 live = newLive ?? live
+            }
+            // The fetched list may predate a pushed completion; track() keeps that completion.
+            if let newLive {
+                runningHooks.track(newLive.reversed())
+                updateTicker()
             }
             updatedAt = .now
             // Rides the same poll tick as summary/live, so opening the panel's Turn section

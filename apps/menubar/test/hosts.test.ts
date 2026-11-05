@@ -108,6 +108,8 @@ test.skipIf(process.platform !== "darwin")(
         "an empty-events frame with changed triggers a refetch",
         "a frame after a host switch is dropped",
         "a malformed frame is ignored",
+        "running hooks track start and complete and prune stale ones",
+        "no ticker while the panel is closed or nothing is running",
       ];
       expect(new Set(declared).size).toBe(declared.length);
       expect([...declared].sort()).toEqual([...required].sort());
