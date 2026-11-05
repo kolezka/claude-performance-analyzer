@@ -1488,6 +1488,17 @@ struct TelemetryHostsTests {
             h.check(model.runningHooks.isEmpty, "hook still running after completion")
         }
 
+        await h.run("removed poll interval keys are cleared by reset all") {
+            let store = IsolatedDefaults(); defer { store.cleanup() }
+            h.check(Prefs.Key.retired == ["statusPollIntervalSec", "panelPollIntervalSec"], "retired keys: \(Prefs.Key.retired)")
+            store.defaults.set(2.0, forKey: "statusPollIntervalSec")
+            store.defaults.set(2.0, forKey: "panelPollIntervalSec")
+            let model = makeModel(store); defer { shutdown(model) }
+            model.resetAllSettings()
+            h.check(store.defaults.object(forKey: "statusPollIntervalSec") == nil, "status poll key kept")
+            h.check(store.defaults.object(forKey: "panelPollIntervalSec") == nil, "panel poll key kept")
+        }
+
         print("SUMMARY passed=\(h.passed) failed=\(h.failed)")
         exit(h.failed == 0 ? 0 : 1)
     }

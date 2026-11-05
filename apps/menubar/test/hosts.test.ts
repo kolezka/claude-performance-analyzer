@@ -110,6 +110,7 @@ test.skipIf(process.platform !== "darwin")(
         "a malformed frame is ignored",
         "running hooks track start and complete and prune stale ones",
         "no ticker while the panel is closed or nothing is running",
+        "removed poll interval keys are cleared by reset all",
       ];
       expect(new Set(declared).size).toBe(declared.length);
       expect([...declared].sort()).toEqual([...required].sort());
