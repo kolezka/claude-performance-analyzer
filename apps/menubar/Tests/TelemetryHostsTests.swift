@@ -1117,6 +1117,17 @@ struct TelemetryHostsTests {
             }
         }
 
+        // MARK: - Live updates
+
+        await h.run("socket URL swaps the scheme and keeps the collector path and port") {
+            let a = Telemetry.socketURL(for: URL(string: "http://127.0.0.1:4318/")!)
+            h.check(a.absoluteString == "ws://127.0.0.1:4318/ws", "got \(a)")
+            let b = Telemetry.socketURL(for: URL(string: "https://box.example:8443/collector/")!)
+            h.check(b.absoluteString == "wss://box.example:8443/collector/ws", "got \(b)")
+            let frame = try JSONDecoder().decode(LiveFrame.self, from: Data(#"{"type":"events","host":"local","events":[],"changed":3}"#.utf8))
+            h.check(frame.changed == 3 && frame.events.isEmpty, "frame decode")
+        }
+
         print("SUMMARY passed=\(h.passed) failed=\(h.failed)")
         exit(h.failed == 0 ? 0 : 1)
     }

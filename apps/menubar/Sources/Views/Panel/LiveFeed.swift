@@ -10,7 +10,7 @@ struct LiveFeed: View {
         if !events.isEmpty {
             VStack(alignment: .leading, spacing: 4) {
                 SectionTitle("Live")
-                let ids = rowIds(events.map { "\($0.tsMs)/\($0.sessionId ?? "")/\($0.kind)/\($0.label)" })
+                let ids = rowIds(events.map(\.liveKey))
                 ForEach(Array(zip(ids, events).prefix(Prefs.clamp(liveFeedLength, 5...15))), id: \.0) { _, e in
                     row(e)
                 }
