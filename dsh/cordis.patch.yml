@@ -1,0 +1,17 @@
+- insert:
+    - id: claude-compat-performance-analyzer
+      name: '@kolezka/performance-analyzer-dsh'
+# The plugin's .mcp.json `harness` server: bun on the release build's dist/mcp/server.js.
+# It inspects Claude Code sessions and settings, so it ships disabled; enable with
+# `- id: claude-compat-performance-analyzer-mcp` + `disabled: false`.
+- insert:
+    - id: claude-compat-performance-analyzer-mcp
+      name: '@deepseek-ai/dsh-mcp-client'
+      disabled: true
+      config:
+        serverName: harness
+        transport: stdio
+        command: bun
+        args:
+          - !!js '(process.env.PERFORMANCE_ANALYZER_ROOT || "") + "/dist/mcp/server.js"'
+        failOnStartupError: false
