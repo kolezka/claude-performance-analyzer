@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "performance-analyzer",
+    "description": "Lets a coding agent ask what its Claude Code harness costs: hook time, text hooks inject into context, and Hindsight memory's share, with the plugin or settings file behind each cost. A read-only MCP server plus a skill that tells the agent when to call it, how to read the numbers and where each fix goes; needs Bun."
+  }
+}
