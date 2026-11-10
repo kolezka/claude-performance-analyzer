@@ -47,4 +47,4 @@ The plugin ships `skills/harness-cost`, which Claude Code loads as `performance-
 
 `bun apps/mcp/scripts/probe.ts harness_summary '{"session":"all","since":"7d"}'` runs one tool from the shell and prints how long it took.
 
-To try the plugin build for one session: `bun run build:plugin`, then `claude --plugin-dir .`. Releases come from the `Release plugin` workflow, which builds `dist/` onto the `release` branch the marketplace installs from. Bump `version` in `.claude-plugin/plugin.json` first; the workflow refuses to republish the same version.
+To try the plugin build for one session: `bun run build:plugin`, then `claude --plugin-dir .`. Releases come from the `Release plugin` workflow, which builds `dist/` onto the `release` branch the marketplace installs from. Bump `version` in `.claude-plugin/plugin.json` first; the workflow refuses to republish the same version. Bump `dsh/package.json` to the same version; `test/dsh-adapter.test.ts` checks that they match.

@@ -114,6 +114,24 @@ The plugin also ships the `harness-cost` skill. It tells the agent when to reach
 
 The server only reads. It never changes your settings or hooks, and it covers sessions on this Mac. Parameters and where each number comes from: [docs/mcp.md](docs/mcp.md).
 
+### DeepSeek Harness
+
+`dsh/` is a DeepSeek Harness (DSH) adapter for the same plugin. It loads the `harness-cost` skill through the published [`claude-plugin-dsh`](https://www.npmjs.com/package/claude-plugin-dsh) package, pinned to 0.1.0 in `dsh/package.json` and `dsh/bun.lock`. The Claude Code install above does not change.
+
+DSH does not install the adapter's dependencies for you. Install them first, from a release checkout (the `release` branch, which carries `dist/`):
+
+```bash
+cd /absolute/path/to/claude-performance-analyzer/dsh && bun install --frozen-lockfile
+# or, from anywhere:
+bun install --cwd /absolute/path/to/claude-performance-analyzer/dsh --frozen-lockfile
+```
+
+Then add it with `dsh plugin add file:/absolute/path/to/claude-performance-analyzer/dsh`. To see what it registers without touching a profile, run `bun x claude-plugin-dsh@0.1.0 inspect /absolute/path/to/claude-performance-analyzer`.
+
+The `harness` MCP server is not mapped automatically. `dsh/cordis.patch.yml` carries an explicit `dsh-mcp-client` row for it that ships disabled, because the server reads Claude Code sessions and settings. To enable it, set `PERFORMANCE_ANALYZER_ROOT` to the release checkout and add `- id: claude-compat-performance-analyzer-mcp` with `disabled: false` to your profile.
+
+To move to a newer runtime, change the exact version in `dsh/package.json` and run `bun install` in `dsh/` to refresh `dsh/bun.lock`. Do not run the package's `sync` or `scaffold` commands here: in 0.1.0 they write a vendored runtime copy, and this adapter imports the package directly.
+
 ## Your other machines
 
 Claude Code on another Linux or macOS machine can send its telemetry to this Mac over [Tailscale](https://tailscale.com) or your LAN. Nothing extra runs on the other machine.
