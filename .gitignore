@@ -37,3 +37,6 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 apps/menubar/build
 .codegraph/
 graphify-out/cache/
+
+# Claude Code agent worktrees
+.claude/worktrees/
