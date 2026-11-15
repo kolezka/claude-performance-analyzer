@@ -127,6 +127,16 @@ test("ttft and turn time come from trace spans when present", () => {
   expect(out.kpis.turnP50).toBe(4200);
 });
 
+test("ttft on api_request events counts only for harnesses without traces", () => {
+  const events = parseLogs({
+    resourceLogs: [
+      { resource: { attributes: [{ key: "service.name", value: s("claude-code") }] }, scopeLogs: [{ logRecords: [logRecord("api_request", 1000, { ttft_ms: i(9999) })] }] },
+      { resource: { attributes: [{ key: "service.name", value: s("deepseek-harness") }] }, scopeLogs: [{ logRecords: [logRecord("api_request", 1000, { ttft_ms: i(300) })] }] },
+    ],
+  });
+  expect(summarize(events, [], 3600_000, NOW).kpis.ttftP50).toBe(300);
+});
+
 test("helpers", () => {
   expect(percentile([1, 2, 3, 4], 50)).toBe(2);
   expect(percentile([], 95)).toBe(0);

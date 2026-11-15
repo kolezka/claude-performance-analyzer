@@ -330,6 +330,7 @@ export function summarize(events: EventRow[], spans: SpanRow[], windowMs: number
   let costUsd = 0;
   let compactions = 0;
   let compactionMs = 0;
+  const eventTtft: number[] = [];
 
   for (const e of events) {
     if (e.tsMs < sinceMs) continue;
@@ -353,6 +354,9 @@ export function summarize(events: EventRow[], spans: SpanRow[], windowMs: number
         tokens.output += num(a.output_tokens);
         tokens.cacheRead += num(a.cache_read_tokens);
         tokens.cacheCreation += num(a.cache_creation_tokens);
+        // DeepSeek Harness sends no traces, so its time-to-first-token rides on the event.
+        // Claude Code's copy is skipped here because its trace span already counts it.
+        if (a["service.name"] === "deepseek-harness" && a.ttft_ms !== undefined) eventTtft.push(num(a.ttft_ms));
         if (a["skill.name"]) {
           const g = skills.get(String(a["skill.name"]));
           g.add(ms);
@@ -404,8 +408,8 @@ export function summarize(events: EventRow[], spans: SpanRow[], windowMs: number
     }
   }
 
-  // Traces (beta) carry time-to-first-token, which events do not.
-  const ttft: number[] = [];
+  // Claude Code carries time-to-first-token on trace spans (beta); DeepSeek Harness on events.
+  const ttft: number[] = [...eventTtft];
   const turnMs: number[] = [];
   for (const s of spans) {
     if (s.startMs < sinceMs) continue;
