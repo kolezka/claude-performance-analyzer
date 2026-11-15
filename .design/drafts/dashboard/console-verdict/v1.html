@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dashboard: Console: verdict first</title>
+<script>document.documentElement.classList.toggle("dark", new URLSearchParams(location.search).get("theme") === "dark");</script>
+<script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4.3.3"></script>
+<style type="text/tailwindcss">
+  @custom-variant dark (&:where(.dark, .dark *));
+  @theme {
+    --font-sans: ui-sans-serif, system-ui, sans-serif;
+    --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+    --color-api: #4c8dff; --color-tools: #ff8a4c; --color-hooks: #2fcf93; --color-warn: #f5b83d; --color-crit: #f0565a;
+  }
+  @utility navitem { @apply flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-slate-600 hover:bg-slate-200/70 dark:text-slate-400 dark:hover:bg-white/5; }
+  @utility th { @apply py-1.5 pr-3 text-left text-[11px] font-medium text-slate-500 dark:text-slate-500; }
+  @utility td { @apply border-t border-slate-200 py-1.5 pr-3 dark:border-white/5; }
+</style>
+</head>
+<body class="bg-slate-50 text-slate-900 dark:bg-[#0d1117] dark:text-slate-200 text-[13px] antialiased">
+<div class="flex min-h-screen">
+
+  <aside class="hidden w-56 shrink-0 flex-col border-r border-slate-200 bg-slate-100 md:flex dark:border-white/10 dark:bg-[#090c10]">
+    <div class="px-4 pt-4 pb-3">
+      <div class="font-mono text-[13px] font-semibold tracking-tight">cc<span class="text-api">/</span>speed</div>
+      <select class="mt-3 w-full rounded-md border border-slate-300 bg-white px-2 py-1.5 text-xs dark:border-white/10 dark:bg-white/5">
+        <option>This Mac</option><option>studio-mini</option><option>ci-runner-02</option>
+      </select>
+    </div>
+    <nav class="flex-1 space-y-0.5 px-2 text-[13px]">
+      <a class="navitem bg-white font-medium text-slate-900! shadow-sm ring-1 ring-slate-200 dark:bg-api/15 dark:ring-api/30 dark:text-white!" href="#">
+        <svg class="size-4" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 13V7m4 6V3m4 10V9m4 4V5"/></svg>Overview</a>
+      <a class="navitem" href="#"><svg class="size-4" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 4h8M4 8h10M3 12h6"/></svg>Turns<span class="ml-auto font-mono text-[11px] text-slate-400">38</span></a>
+      <a class="navitem" href="#"><svg class="size-4" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M5 2v5a3 3 0 0 0 6 0V2M8 10v4"/></svg>Hooks<span class="ml-auto size-1.5 rounded-full bg-warn"></span></a>
+      <a class="navitem" href="#"><svg class="size-4" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M10 2l4 4-8 8H2v-4z"/></svg>Tools &amp; MCP</a>
+      <a class="navitem" href="#"><svg class="size-4" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="5.5"/><path d="M8 5v3l2 1"/></svg>Models</a>
+      <a class="navitem" href="#"><svg class="size-4" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M8 2l6 11H2z"/></svg>Errors<span class="ml-auto font-mono text-[11px] text-crit">4</span></a>
+      <div class="px-2.5 pt-4 pb-1 text-[11px] font-medium text-slate-400 dark:text-slate-500">Setup</div>
+      <a class="navitem" href="#"><svg class="size-4" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="3" width="12" height="8" rx="1"/><path d="M5 14h6"/></svg>Remote hosts<span class="ml-auto font-mono text-[11px] text-slate-400">2</span></a>
+      <a class="navitem" href="#"><svg class="size-4" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="2"/><path d="M8 1v2m0 10v2M1 8h2m10 0h2"/></svg>Telemetry settings<span class="ml-auto rounded bg-api/15 px-1 font-mono text-[10px] text-api">3</span></a>
+    </nav>
+    <div class="border-t border-slate-200 p-3 dark:border-white/10">
+      <div class="flex items-center gap-2 text-xs"><span class="size-2 animate-pulse rounded-full bg-hooks"></span><span class="font-medium">Live</span><span class="text-slate-500">last event 4s ago</span></div>
+      <div class="mt-2 font-mono text-[11px] text-slate-500">2,418 events · 20:31</div>
+    </div>
+  </aside>
+
+  <div class="min-w-0 flex-1">
+    <header class="flex items-center gap-3 border-b border-slate-200 px-6 py-3 dark:border-white/10">
+      <h1 class="text-[15px] font-semibold">Overview</h1>
+      <nav class="ml-auto flex rounded-md bg-slate-200/70 p-0.5 font-mono text-xs dark:bg-white/5">
+        <button class="rounded px-2.5 py-1 text-slate-500">15m</button>
+        <button class="rounded bg-white px-2.5 py-1 font-semibold shadow-sm dark:bg-white/15">1h</button>
+        <button class="rounded px-2.5 py-1 text-slate-500">24h</button>
+        <button class="rounded px-2.5 py-1 text-slate-500">7d</button>
+      </nav>
+    </header>
+
+    <div class="grid xl:grid-cols-[1fr_340px]">
+      <div class="min-w-0 space-y-6 p-6">
+        <!-- Verdict: the answer before the numbers -->
+        <section class="rounded-lg border border-slate-200 bg-white dark:border-white/10 dark:bg-white/[.03]">
+          <div class="grid lg:grid-cols-[1fr_1fr]">
+            <div class="p-5">
+              <div class="text-xs text-slate-500">Last hour on This Mac</div>
+              <p class="mt-1.5 text-xl leading-snug font-semibold tracking-tight">Turns take <span class="font-mono text-api">38s</span> at p50. Hooks eat <span class="font-mono text-warn">17%</span> of that, mostly <span class="font-mono text-[17px]">PreToolUse:Bash</span>.</p>
+              <div class="mt-4 flex h-2.5 overflow-hidden rounded-full"><div class="bg-api" style="width:58%"></div><div class="bg-tools" style="width:25%"></div><div class="bg-hooks" style="width:17%"></div></div>
+              <div class="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-600 dark:text-slate-400">
+                <span><i class="mr-1 inline-block size-2 rounded-sm bg-api"></i>Model <span class="font-mono">11m 02s</span></span>
+                <span><i class="mr-1 inline-block size-2 rounded-sm bg-tools"></i>Tools <span class="font-mono">4m 45s</span></span>
+                <span><i class="mr-1 inline-block size-2 rounded-sm bg-hooks"></i>Hooks <span class="font-mono">3m 12s</span></span>
+              </div>
+            </div>
+            <ol class="divide-y divide-slate-200 border-t border-slate-200 text-xs lg:border-t-0 lg:border-l dark:divide-white/10 dark:border-white/10">
+              <li class="flex gap-3 px-4 py-3"><span class="mt-1 size-2 shrink-0 rounded-full bg-warn"></span><div class="min-w-0"><div class="text-[13px]"><span class="font-mono">PreToolUse:Bash</span> p95 <span class="font-mono">2.8s</span> over 61 calls</div><div class="mt-0.5 text-slate-500">Only slow in claude-performance-analyzer. Same hook elsewhere: p95 0.3s.</div></div><a class="ml-auto shrink-0 text-api" href="#">Open</a></li>
+              <li class="flex gap-3 px-4 py-3"><span class="mt-1 size-2 shrink-0 rounded-full bg-crit"></span><div class="min-w-0"><div class="text-[13px]">4 API errors, 529 overloaded</div><div class="mt-0.5 text-slate-500">20:28 to 20:31, all claude-opus-5-5.</div></div><a class="ml-auto shrink-0 text-api" href="#">Open</a></li>
+              <li class="flex gap-3 px-4 py-3"><span class="mt-1 size-2 shrink-0 rounded-full bg-slate-400"></span><div class="min-w-0"><div class="text-[13px]">MCP <span class="font-mono">outline</span> took <span class="font-mono">6.4s</span> to connect</div><div class="mt-0.5 text-slate-500">1 of 3 connects failed.</div></div><a class="ml-auto shrink-0 text-api" href="#">Open</a></li>
+            </ol>
+          </div>
+        </section>
+
+        <!-- KPIs, quieter -->
+        <section class="grid grid-cols-3 gap-px overflow-hidden rounded-lg border border-slate-200 bg-slate-200 lg:grid-cols-6 dark:border-white/10 dark:bg-white/10">
+          <div class="bg-white px-4 py-3 dark:bg-[#0d1117]"><div class="text-[11px] text-slate-500">API p50</div><div class="font-mono text-lg font-semibold">4.2s</div><div class="text-[11px] text-slate-500">p95 9.8s</div></div>
+          <div class="bg-white px-4 py-3 dark:bg-[#0d1117]"><div class="text-[11px] text-slate-500">Turn p50</div><div class="font-mono text-lg font-semibold">38.0s</div><div class="text-[11px] text-slate-500">38 prompts</div></div>
+          <div class="bg-white px-4 py-3 dark:bg-[#0d1117]"><div class="text-[11px] text-slate-500">First token</div><div class="font-mono text-lg font-semibold text-slate-400 dark:text-slate-600">n/a</div><div class="text-[11px] text-slate-500">needs traces</div></div>
+          <div class="bg-white px-4 py-3 dark:bg-[#0d1117]"><div class="text-[11px] text-warn">Hook time</div><div class="font-mono text-lg font-semibold">3m 12s</div><div class="text-[11px] text-slate-500">17% in-turn</div></div>
+          <div class="bg-white px-4 py-3 dark:bg-[#0d1117]"><div class="text-[11px] text-slate-500">Cost</div><div class="font-mono text-lg font-semibold">$4.12</div><div class="text-[11px] text-slate-500">182k out</div></div>
+          <div class="bg-white px-4 py-3 dark:bg-[#0d1117]"><div class="text-[11px] text-slate-500">Cache hit</div><div class="font-mono text-lg font-semibold">91%</div><div class="text-[11px] text-slate-500">1.9M read</div></div>
+        </section>
+
+        <!-- Slowest turns -->
+        <section>
+          <div class="mb-2 flex items-baseline gap-3"><h2 class="font-semibold">Slowest turns</h2><a class="ml-auto text-xs text-api" href="#">All 38 turns →</a></div>
+          <table class="w-full text-xs">
+            <thead><tr><th class="th">Turn</th><th class="th">Repo</th><th class="th w-[38%]">Model · tools · hooks</th><th class="th text-right">Active</th><th class="th text-right">Idle</th></tr></thead>
+            <tbody class="font-mono">
+              <tr><td class="td">/review</td><td class="td font-sans text-slate-500">claude-performance-analyzer</td><td class="td"><div class="flex h-2 overflow-hidden rounded-sm"><div class="bg-api" style="width:52%"></div><div class="bg-tools" style="width:22%"></div><div class="bg-hooks" style="width:21%"></div></div></td><td class="td text-right font-semibold">2m 14s</td><td class="td text-right text-slate-400">41s</td></tr>
+              <tr><td class="td font-sans">prompt, 412 chars</td><td class="td font-sans text-slate-500">design-studio</td><td class="td"><div class="flex h-2 overflow-hidden rounded-sm"><div class="bg-api" style="width:70%"></div><div class="bg-tools" style="width:20%"></div><div class="bg-hooks" style="width:6%"></div></div></td><td class="td text-right font-semibold">1m 52s</td><td class="td text-right text-slate-400">0s</td></tr>
+              <tr><td class="td">/load</td><td class="td font-sans text-slate-500">tmuxaxxing <span class="rounded bg-slate-200 px-1 text-[10px] dark:bg-white/10">headless</span></td><td class="td"><div class="flex h-2 overflow-hidden rounded-sm"><div class="bg-api" style="width:40%"></div><div class="bg-tools" style="width:48%"></div><div class="bg-hooks" style="width:9%"></div></div></td><td class="td text-right font-semibold">58s</td><td class="td text-right text-slate-400">2s</td></tr>
+            </tbody>
+          </table>
+        </section>
+
+        <!-- Latency -->
+        <section>
+          <div class="mb-2 flex items-baseline gap-3"><h2 class="font-semibold">API latency</h2>
+            <span class="flex items-center gap-1 text-xs text-slate-500"><i class="h-0.5 w-3 bg-api"></i>p50</span>
+            <span class="flex items-center gap-1 text-xs text-slate-500"><i class="h-0 w-3 border-t border-dashed border-api"></i>p95</span></div>
+          <div class="rounded-lg border border-slate-200 p-3 dark:border-white/10">
+            <svg viewBox="0 0 800 110" class="h-28 w-full" fill="none" preserveAspectRatio="none">
+              <path d="M0 80 L66 76 L133 78 L200 66 L266 72 L333 52 L400 74 L466 66 L533 56 L600 70 L666 66 L733 62 L800 64" stroke="#4c8dff" stroke-width="2"/>
+              <path d="M0 46 L66 40 L133 50 L200 28 L266 38 L333 12 L400 44 L466 32 L533 20 L600 36 L666 34 L733 22 L800 30" stroke="#4c8dff" stroke-width="1.5" stroke-dasharray="4 3" opacity=".6"/>
+              <rect x="560" y="0" width="40" height="110" fill="#f0565a" opacity=".08"/>
+            </svg>
+            <div class="flex justify-between font-mono text-[10px] text-slate-400"><span>19:35</span><span>20:05</span><span class="text-crit">529 ×4</span><span>20:31</span></div>
+          </div>
+        </section>
+      </div>
+
+      <!-- Live rail -->
+      <aside class="border-t border-slate-200 p-5 xl:border-t-0 xl:border-l dark:border-white/10">
+        <div class="flex items-center gap-2"><h2 class="font-semibold">Live</h2><span class="ml-auto text-xs text-slate-500">This Mac</span></div>
+        <div class="mt-3 rounded-md border border-warn/40 bg-warn/10 px-3 py-2 text-xs"><span class="font-mono">PreToolUse:Bash</span> running <span class="font-mono font-semibold">1.2s</span></div>
+        <ol class="mt-3 space-y-px font-mono text-xs text-slate-700 dark:text-slate-300">
+          <li class="grid grid-cols-[58px_1fr_44px] items-center gap-2 rounded bg-api/10 px-1.5 py-1"><span class="text-slate-500">20:31:07</span><span class="truncate"><span class="text-api">api</span> opus-5-5 1,204 tok</span><span class="text-right">8.4s</span></li>
+          <li class="grid grid-cols-[58px_1fr_44px] items-center gap-2 px-1.5 py-1"><span class="text-slate-500">20:31:05</span><span class="truncate"><span class="text-tools">tool</span> Bash bun test</span><span class="text-right">3.1s</span></li>
+          <li class="grid grid-cols-[58px_1fr_44px] items-center gap-2 px-1.5 py-1"><span class="text-slate-500">20:31:02</span><span class="truncate"><span class="text-hooks">hook</span> PreToolUse:Bash</span><span class="text-right text-warn">2.8s</span></li>
+          <li class="grid grid-cols-[58px_1fr_44px] items-center gap-2 px-1.5 py-1"><span class="text-slate-500">20:30:58</span><span class="truncate text-crit">err API error 529</span><span class="text-right">0.4s</span></li>
+          <li class="grid grid-cols-[58px_1fr_44px] items-center gap-2 px-1.5 py-1"><span class="text-slate-500">20:30:51</span><span class="truncate"><span class="text-slate-400">agent</span> Explore</span><span class="text-right">40.2s</span></li>
+          <li class="grid grid-cols-[58px_1fr_44px] items-center gap-2 px-1.5 py-1"><span class="text-slate-500">20:30:44</span><span class="truncate"><span class="text-tools">tool</span> mcp__outline__list_documents</span><span class="text-right">2.2s</span></li>
+          <li class="grid grid-cols-[58px_1fr_44px] items-center gap-2 px-1.5 py-1"><span class="text-slate-500">20:30:40</span><span class="truncate"><span class="text-slate-400">skill</span> design-studio</span><span class="text-right"></span></li>
+          <li class="grid grid-cols-[58px_1fr_44px] items-center gap-2 px-1.5 py-1"><span class="text-slate-500">20:30:38</span><span class="truncate"><span class="text-slate-400">prompt</span> 412 chars</span><span class="text-right"></span></li>
+        </ol>
+        <div class="mt-5 rounded-md border border-dashed border-slate-300 p-3 text-xs text-slate-500 dark:border-white/15">
+          <div class="font-medium text-slate-700 dark:text-slate-300">studio-mini</div>
+          No telemetry yet. Paste its env block into <code class="font-mono">~/.claude/settings.json</code> there and restart Claude Code.
+        </div>
+      </aside>
+    </div>
+  </div>
+</div>
+</body>
+</html>

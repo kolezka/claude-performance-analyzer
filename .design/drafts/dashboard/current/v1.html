@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dashboard: current</title>
+<script>document.documentElement.classList.toggle("dark", new URLSearchParams(location.search).get("theme") === "dark");</script>
+<script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4.3.3"></script>
+<style type="text/tailwindcss">
+  @custom-variant dark (&:where(.dark, .dark *));
+  @theme {
+    --font-sans: system-ui, -apple-system, "Segoe UI", sans-serif;
+    --color-api: #2a78d6; --color-tools: #eb6834; --color-hooks: #1baf7a; --color-warn: #fab219; --color-crit: #d03b3b;
+  }
+  @utility glass { background: rgb(255 255 255 / .55); border: 1px solid rgb(255 255 255 / .75); box-shadow: inset 0 1px 0 rgb(255 255 255 / .9), 0 8px 24px rgb(30 40 60 / .08); backdrop-filter: blur(28px) saturate(180%); }
+  @utility card { border-radius: 18px; padding: 14px 16px; margin-bottom: 12px; }
+</style>
+<style>
+  body { background: radial-gradient(60% 50% at 10% 0%, rgba(42,120,214,.18), transparent 70%), radial-gradient(50% 40% at 95% 20%, rgba(235,104,52,.12), transparent 70%), radial-gradient(60% 50% at 50% 100%, rgba(27,175,122,.12), transparent 70%), #eef1f6; background-attachment: fixed; }
+  .dark body { background: radial-gradient(60% 50% at 10% 0%, rgba(57,135,229,.22), transparent 70%), radial-gradient(50% 40% at 95% 20%, rgba(217,89,38,.12), transparent 70%), #0b0d12; }
+  .dark .glass { background: rgb(255 255 255 / .06); border-color: rgb(255 255 255 / .14); box-shadow: inset 0 1px 0 rgb(255 255 255 / .12), 0 10px 30px rgb(0 0 0 / .3); }
+  td, th { border-bottom: 1px solid rgb(0 0 0 / .07); padding: 4px 6px 4px 0; }
+  .dark td, .dark th { border-color: rgb(255 255 255 / .07); }
+</style>
+</head>
+<body class="min-h-screen p-4 pb-6 text-[13px] leading-snug text-zinc-950 dark:text-white antialiased">
+<header class="flex items-center gap-3 mb-3">
+  <h1 class="text-[17px] font-bold tracking-tight">Claude Code speed</h1>
+  <nav class="glass flex gap-0.5 p-0.5 rounded-full">
+    <button class="px-3 py-0.5 rounded-full text-zinc-600 dark:text-zinc-300">15m</button>
+    <button class="px-3 py-0.5 rounded-full bg-white/90 dark:bg-white/15 font-semibold shadow-sm">1h</button>
+    <button class="px-3 py-0.5 rounded-full text-zinc-600 dark:text-zinc-300">24h</button>
+    <button class="px-3 py-0.5 rounded-full text-zinc-600 dark:text-zinc-300">7d</button>
+  </nav>
+  <label class="flex items-center gap-1.5 text-xs"><span class="text-zinc-500">Host</span>
+    <select class="glass rounded-full px-2.5 py-0.5 bg-transparent"><option>This Mac</option><option>studio-mini</option></select></label>
+  <span class="ml-auto text-[11px] text-zinc-500">2,418 events · 20:31</span>
+</header>
+
+<section class="glass card">
+  <h2 class="font-semibold mb-1.5">Send Claude Code telemetry from this Mac here</h2>
+  <p class="my-1.5">Missing in <code class="font-mono text-[11.5px]">~/.claude/settings.json</code> env: <code class="font-mono text-[11.5px] px-1.5 rounded bg-white/60 dark:bg-white/10">OTEL_LOG_TOOL_DETAILS</code> <code class="font-mono text-[11.5px] px-1.5 rounded bg-white/60 dark:bg-white/10">CLAUDE_CODE_ENHANCED_TELEMETRY_BETA</code> <code class="font-mono text-[11.5px] px-1.5 rounded bg-white/60 dark:bg-white/10">OTEL_TRACES_EXPORTER</code></p>
+  <button class="rounded-full bg-api text-white font-semibold px-4 py-1.5 mr-2">Add 3 missing settings</button>
+  <span class="text-zinc-500">Existing values are never changed. A backup is written first.</span>
+</section>
+
+<details class="glass card"><summary class="font-semibold cursor-pointer list-none">▸ Remote hosts</summary></details>
+
+<section class="glass card">
+  <div class="flex items-center gap-2 text-xs mb-1.5">
+    <span class="size-2 rounded-full bg-hooks"></span><strong>Live</strong><span class="text-zinc-500">last event 4s ago</span>
+    <span class="glass rounded-full px-2.5"><span class="text-warn">●</span> hook PreToolUse:Bash running 1.2s</span>
+  </div>
+  <div class="text-xs space-y-0.5 font-normal">
+    <div class="grid grid-cols-[64px_10px_1.4fr_1fr_52px] gap-2 items-center"><span class="text-zinc-500 tabular-nums">20:31:07</span><span class="size-2 rounded-sm bg-api"></span><span class="truncate text-zinc-600 dark:text-zinc-300">claude-opus-5-5 1,204 tok out</span><span><span class="block h-2 bg-api rounded-r" style="width:78%"></span></span><span class="text-right tabular-nums">8.4s</span></div>
+    <div class="grid grid-cols-[64px_10px_1.4fr_1fr_52px] gap-2 items-center"><span class="text-zinc-500 tabular-nums">20:31:05</span><span class="size-2 rounded-sm bg-tools"></span><span class="truncate text-zinc-600 dark:text-zinc-300">Bash bun test</span><span><span class="block h-2 bg-tools rounded-r" style="width:30%"></span></span><span class="text-right tabular-nums">3.1s</span></div>
+    <div class="grid grid-cols-[64px_10px_1.4fr_1fr_52px] gap-2 items-center"><span class="text-zinc-500 tabular-nums">20:31:02</span><span class="size-2 rounded-sm bg-hooks"></span><span class="truncate text-zinc-600 dark:text-zinc-300">PreToolUse:Bash</span><span><span class="block h-2 bg-hooks rounded-r" style="width:27%"></span></span><span class="text-right tabular-nums">2.8s</span></div>
+    <div class="grid grid-cols-[64px_10px_1.4fr_1fr_52px] gap-2 items-center"><span class="text-zinc-500 tabular-nums">20:30:58</span><span class="size-2 rounded-sm bg-crit"></span><span class="truncate text-crit">API error 529 (failed)</span><span></span><span class="text-right tabular-nums">0.4s</span></div>
+  </div>
+</section>
+
+<section class="grid grid-cols-[repeat(auto-fit,minmax(118px,1fr))] gap-2 mb-3">
+  <div class="glass rounded-2xl px-3.5 py-2.5"><div class="text-[11px] text-zinc-600 dark:text-zinc-300">API latency p50</div><div class="text-2xl font-bold tracking-tight">4.2s</div><div class="text-[11px] text-zinc-500">p95 9.8s · 142 req</div></div>
+  <div class="glass rounded-2xl px-3.5 py-2.5"><div class="text-[11px] text-zinc-600 dark:text-zinc-300">Turn time p50</div><div class="text-2xl font-bold tracking-tight">38.0s</div><div class="text-[11px] text-zinc-500">38 prompts · 4 sessions</div></div>
+  <div class="glass rounded-2xl px-3.5 py-2.5"><div class="text-[11px] text-zinc-600 dark:text-zinc-300">Time to first token</div><div class="text-2xl font-bold tracking-tight">1.9s</div><div class="text-[11px] text-zinc-500">p50</div></div>
+  <div class="glass rounded-2xl px-3.5 py-2.5"><div class="text-[11px] text-zinc-600 dark:text-zinc-300"><span class="text-warn">⚠</span> Hook time</div><div class="text-2xl font-bold tracking-tight">3m 12s</div><div class="text-[11px] text-zinc-500">17% of in-turn time</div></div>
+  <div class="glass rounded-2xl px-3.5 py-2.5"><div class="text-[11px] text-zinc-600 dark:text-zinc-300">Cost</div><div class="text-2xl font-bold tracking-tight">$4.12</div><div class="text-[11px] text-zinc-500">182k out · 2.1M in</div></div>
+  <div class="glass rounded-2xl px-3.5 py-2.5"><div class="text-[11px] text-zinc-600 dark:text-zinc-300">Cache hit</div><div class="text-2xl font-bold tracking-tight">91%</div><div class="text-[11px] text-zinc-500">1.9M read · 140k write</div></div>
+</section>
+
+<div class="glass card">
+  <h2 class="font-semibold mb-2.5">Where turn time goes</h2>
+  <div class="flex gap-3.5 text-[11px] text-zinc-600 dark:text-zinc-300 mb-1.5"><span><i class="inline-block size-2.5 rounded-sm bg-api mr-1"></i>Model (API)</span><span><i class="inline-block size-2.5 rounded-sm bg-tools mr-1"></i>Tools</span><span><i class="inline-block size-2.5 rounded-sm bg-hooks mr-1"></i>Hooks</span></div>
+  <div class="flex h-8 rounded overflow-hidden text-white text-[11px] font-semibold"><div class="bg-api grid place-items-center" style="width:58%">58%</div><div class="bg-tools grid place-items-center" style="width:25%">25%</div><div class="bg-hooks grid place-items-center" style="width:17%">17%</div></div>
+  <p class="text-zinc-500 text-[11px] mt-1">Summed component time. Parallel tool calls can overlap, so parts may exceed wall clock.</p>
+</div>
+
+<div class="glass card">
+  <h2 class="font-semibold mb-1">Turn waterfall</h2>
+  <div class="text-zinc-500 text-[11px] mb-1.5">/review · 2m 14s · 20:28</div>
+  <svg viewBox="0 0 800 120" class="w-full h-28">
+    <g font-size="11" fill="currentColor" opacity=".7"><text x="0" y="16">main</text><text x="0" y="40">main</text><text x="0" y="64">main</text><text x="0" y="88">Explore</text><text x="0" y="112">main</text></g>
+    <rect x="90" y="6" width="120" height="14" rx="2" fill="#2a78d6"/><rect x="212" y="30" width="34" height="14" rx="2" fill="#1baf7a"/><rect x="248" y="30" width="80" height="14" rx="2" fill="#eb6834"/><rect x="330" y="54" width="180" height="14" rx="2" fill="#2a78d6"/><rect x="340" y="78" width="260" height="14" rx="2" fill="#7d7b76"/><rect x="610" y="102" width="150" height="14" rx="2" fill="#2a78d6"/>
+  </svg>
+</div>
+
+<div class="glass card">
+  <h2 class="font-semibold mb-2.5">API latency over time</h2>
+  <svg viewBox="0 0 800 160" class="w-full h-40" fill="none"><path d="M0 110 L80 100 L160 104 L240 80 L320 92 L400 60 L480 98 L560 86 L640 70 L720 96 L800 90" stroke="#2a78d6" stroke-width="2"/><path d="M0 60 L80 50 L160 66 L240 30 L320 52 L400 14 L480 58 L560 40 L640 22 L720 50 L800 44" stroke="#86b6ef" stroke-width="2" stroke-dasharray="4 3"/></svg>
+</div>
+
+<div class="grid grid-cols-[repeat(auto-fit,minmax(330px,1fr))] gap-3 mb-3">
+  <div class="glass card !mb-0"><h2 class="font-semibold mb-2.5">Hooks by total time</h2>
+    <div class="space-y-1.5 text-[11px]">
+      <div class="flex items-center gap-2"><span class="w-32 truncate">PreToolUse:Bash</span><span class="h-3 bg-hooks rounded-r" style="width:62%"></span></div>
+      <div class="flex items-center gap-2"><span class="w-32 truncate">UserPromptSubmit</span><span class="h-3 bg-hooks rounded-r" style="width:28%"></span></div>
+      <div class="flex items-center gap-2"><span class="w-32 truncate">PostToolUse:Edit</span><span class="h-3 bg-hooks rounded-r" style="width:11%"></span></div>
+    </div></div>
+  <div class="glass card !mb-0"><h2 class="font-semibold mb-2.5">Tools, skills, MCP by total time</h2>
+    <div class="space-y-1.5 text-[11px]">
+      <div class="flex items-center gap-2"><span class="w-32 truncate">Bash</span><span class="h-3 bg-tools rounded-r" style="width:70%"></span></div>
+      <div class="flex items-center gap-2"><span class="w-32 truncate">Task</span><span class="h-3 bg-tools rounded-r" style="width:40%"></span></div>
+      <div class="flex items-center gap-2"><span class="w-32 truncate">mcp__outline__list_documents</span><span class="h-3 bg-tools rounded-r" style="width:12%"></span></div>
+    </div></div>
+</div>
+
+<div class="glass card"><h2 class="font-semibold mb-2.5">Models</h2>
+  <table class="w-full text-xs tabular-nums"><tr class="text-zinc-500 text-left"><th class="font-medium">Model</th><th class="font-medium">Requests</th><th class="font-medium">p50</th><th class="font-medium">p95</th><th class="font-medium">Total</th></tr>
+  <tr><td>claude-opus-5-5</td><td>96</td><td>5.1s</td><td>11.2s</td><td>9m 40s</td></tr><tr><td>claude-haiku-4-5</td><td>46</td><td>0.9s</td><td>2.0s</td><td>48s</td></tr></table>
+</div>
+</body>
+</html>

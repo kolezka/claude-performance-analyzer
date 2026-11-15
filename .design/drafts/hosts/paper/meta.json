@@ -1,0 +1,12 @@
+{
+  "title": "Remote hosts: paper",
+  "direction": "Host list with status, add-host form and one-time env block.",
+  "status": "selected",
+  "variant": "paper",
+  "versions": {
+    "v1": {}
+  },
+  "proposed": [
+    "Rotate token action does not exist in /api/hosts yet"
+  ]
+}

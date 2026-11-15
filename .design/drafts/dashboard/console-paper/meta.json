@@ -1,0 +1,32 @@
+{
+  "title": "Console: paper",
+  "direction": "Same console layout and content. Warm stone neutrals, off-white paper surfaces, serif headings, softer rounder cards and earthier signal colours. Calmer, report-like.",
+  "status": "selected",
+  "versions": {
+    "v1": {
+      "parent": {
+        "draft": "console",
+        "version": 1
+      }
+    },
+    "v2": {
+      "parent": {
+        "draft": "console-paper",
+        "version": 1
+      }
+    }
+  },
+  "tokens": {
+    "bg-dark": "#1c1813",
+    "sidebar-dark": "#14110d",
+    "api": "#3b6fd4",
+    "tools": "#d26a2c",
+    "hooks": "#2a9a6b",
+    "warn": "#b07d14",
+    "crit": "#d24b46",
+    "surface-dark": "#2a241c",
+    "line-dark": "#3a3226"
+  },
+  "notes": "v2: darker secondary text (slate-400/500) and amber warn for contrast on cream, stronger p95 dashed line. Dark mode moved to warm brown-black surfaces and warm hairlines.",
+  "variant": "paper"
+}

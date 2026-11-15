@@ -1,0 +1,14 @@
+{
+  "title": "Tools & MCP: paper",
+  "direction": "Tool table, MCP server connect times and failures, skill loads.",
+  "status": "selected",
+  "variant": "paper",
+  "versions": {
+    "v1": {}
+  },
+  "proposed": [
+    "Table from /api/item?kind=tools",
+    "MCP connect from Summary.mcpConnections",
+    "Skills from Summary.skills"
+  ]
+}

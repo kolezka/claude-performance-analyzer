@@ -1,0 +1,13 @@
+{
+  "title": "Hooks: paper",
+  "direction": "Hook table plus one selected hook: finding, p95 per repo, configured commands, recent calls.",
+  "status": "selected",
+  "variant": "paper",
+  "versions": {
+    "v1": {}
+  },
+  "proposed": [
+    "Table and detail from /api/item?kind=hooks",
+    "Recent calls from /api/hook-call"
+  ]
+}

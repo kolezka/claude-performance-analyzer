@@ -1,9 +1,9 @@
 // Pure ECharts option builders and the palette reader. No chart-instance lifecycle here,
 // see Chart.svelte for that; these functions only build plain option objects.
 import * as echarts from "echarts/core";
-import type { LatencyStats, PromptBreakdown, Summary, TurnSpan, TurnTimeline } from "@cpa/analytics";
+import type { Summary, TurnSpan, TurnTimeline } from "@cpa/analytics";
 import { fmtMs } from "@cpa/analytics";
-import { clock, pct, usd } from "./format";
+import { clock } from "./format";
 
 export const FONT = 'system-ui, -apple-system, "Segoe UI", sans-serif';
 export type Option = Record<string, any>;
@@ -23,13 +23,6 @@ export interface Palette {
   border: string;
 }
 
-// [css var, palette key, label] for the three turn-time components, shared by the breakdown
-// bar, the waterfall legend and the recent-prompts chart.
-export const PARTS: [string, keyof Palette, string][] = [
-  ["--api", "api", "Model (API)"],
-  ["--tools", "tools", "Tools"],
-  ["--hooks", "hooks", "Hooks"],
-];
 
 // Read live CSS custom properties so charts follow light/dark mode without a reload.
 export function palette(): Palette {
@@ -54,58 +47,14 @@ export function palette(): Palette {
 const esc = (s: unknown) =>
   String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
 
-export function statTip(r: LatencyStats, extraLines: string[] = []) {
-  return [r.name, `${r.count} runs, total ${fmtMs(r.totalMs)}`, `p50 ${fmtMs(r.p50)}  p95 ${fmtMs(r.p95)}  max ${fmtMs(r.maxMs)}`, ...extraLines]
-    .concat(r.failures ? [`${r.failures} failed`] : [])
-    .join("\n");
-}
-
 // Hook/tool/model names and prompt commands come from telemetry and are untrusted. Tooltip
 // formatters return HTML, so every line goes through esc() before joining with <br/>.
 export function tooltipHtml(text: string): string {
   return text.split("\n").map(esc).join("<br/>");
 }
 
-// Frosted tooltip to match the glass cards.
+// Soft tooltip shadow to match the paper panels.
 export const TIP_CSS = "border-radius:12px;-webkit-backdrop-filter:blur(20px);backdrop-filter:blur(20px);box-shadow:0 10px 30px rgba(0,0,0,.18);";
-
-export function breakdownOption(pal: Palette, b: Summary["breakdown"]): Option {
-  const vals = [b.api, b.tools, b.hooks];
-  const total = vals.reduce((a, v) => a + v, 0) || 1;
-  const pcts = vals.map((v) => (v / total) * 100);
-  return {
-    backgroundColor: "transparent",
-    textStyle: { fontFamily: FONT },
-    grid: { left: 2, right: 2, top: 2, bottom: 2 },
-    xAxis: { type: "value", max: 100, show: false },
-    yAxis: { type: "category", data: [""], show: false },
-    tooltip: {
-      trigger: "item",
-      backgroundColor: pal.surface,
-      extraCssText: TIP_CSS,
-      borderColor: pal.border,
-      textStyle: { color: pal.ink, fontSize: 12, fontFamily: FONT },
-      formatter: (p: any) => tooltipHtml(`${PARTS[p.seriesIndex as number]![2]}: ${fmtMs(vals[p.seriesIndex as number]!)} (${pct(vals[p.seriesIndex as number]! / total)})`),
-    },
-    series: PARTS.map(([, colorKey, name], i) => ({
-      name,
-      type: "bar",
-      stack: "total",
-      barWidth: "68%",
-      data: [pcts[i]],
-      itemStyle: { color: pal[colorKey] },
-      label: {
-        show: pcts[i]! > 8,
-        formatter: `${name} ${pcts[i]!.toFixed(0)}%`,
-        color: "#ffffff",
-        fontWeight: 600,
-        textBorderWidth: 0,
-        fontSize: 11,
-        fontFamily: FONT,
-      },
-    })),
-  };
-}
 
 export function latencyOption(pal: Palette, pts: Summary["apiSeries"]["points"]): Option {
   return {
@@ -183,101 +132,6 @@ export function latencyOption(pal: Palette, pts: Summary["apiSeries"]["points"])
 export function leftMarginFor(names: string[]): number {
   const longest = Math.min(30, names.reduce((m, n) => Math.max(m, n.length), 1));
   return Math.min(190, Math.max(60, longest * 6 + 16));
-}
-
-// Shared layout for "Hooks by total time" and "Tools, skills, MCP by total time":
-// horizontal bars sorted by total (callers pass already-sorted rows), value label at bar end.
-export function statBarOption(pal: Palette, rows: LatencyStats[], colorKey: "hooks" | "tools", extraTip: (r: LatencyStats) => string[]): Option {
-  const names = rows.map((r) => r.name);
-  return {
-    backgroundColor: "transparent",
-    textStyle: { fontFamily: FONT },
-    grid: { left: leftMarginFor(names), right: 64, top: 2, bottom: 2 },
-    xAxis: { type: "value", show: false },
-    yAxis: {
-      type: "category",
-      data: names,
-      inverse: true,
-      axisLabel: { color: pal.ink2, fontSize: 11, fontFamily: FONT, formatter: (v: string) => (v.length > 30 ? `${v.slice(0, 29)}…` : v) },
-      axisLine: { lineStyle: { color: pal.axis } },
-      axisTick: { show: false },
-    },
-    tooltip: {
-      trigger: "item",
-      backgroundColor: pal.surface,
-      extraCssText: TIP_CSS,
-      borderColor: pal.border,
-      textStyle: { color: pal.ink, fontSize: 12, fontFamily: FONT },
-      formatter: (p: any) => tooltipHtml(p.data.tipText as string),
-    },
-    series: [
-      {
-        type: "bar",
-        barWidth: "62%",
-        itemStyle: { color: pal[colorKey], borderRadius: 3 },
-        data: rows.map((r) => ({
-          value: r.totalMs,
-          tipText: statTip(r, extraTip(r)),
-          labelNote: `${fmtMs(r.totalMs)} · ${r.count}×`,
-        })),
-        label: {
-          show: true,
-          position: "right",
-          color: pal.ink2,
-          fontSize: 11,
-          fontFamily: FONT,
-          formatter: (p: any) => p.data.labelNote as string,
-        },
-      },
-    ],
-  };
-}
-
-export function promptsOption(pal: Palette, prompts: PromptBreakdown[]): Option {
-  const names = prompts.map((p) => `${clock(p.startMs)} ${p.command ?? ""}`.trim());
-  return {
-    backgroundColor: "transparent",
-    textStyle: { fontFamily: FONT },
-    grid: { left: leftMarginFor(names), right: 56, top: 2, bottom: 2 },
-    xAxis: { type: "value", show: false },
-    yAxis: {
-      type: "category",
-      data: names,
-      inverse: true,
-      axisLabel: { color: pal.ink2, fontSize: 11, fontFamily: FONT, formatter: (v: string) => (v.length > 16 ? `${v.slice(0, 15)}…` : v) },
-      axisLine: { lineStyle: { color: pal.axis } },
-      axisTick: { show: false },
-    },
-    tooltip: {
-      trigger: "item",
-      backgroundColor: pal.surface,
-      extraCssText: TIP_CSS,
-      borderColor: pal.border,
-      textStyle: { color: pal.ink, fontSize: 12, fontFamily: FONT },
-      formatter: (p: any) => tooltipHtml(p.data.tipText as string),
-    },
-    series: PARTS.map(([, colorKey, label], seriesIdx) => ({
-      name: label,
-      type: "bar",
-      stack: "total",
-      barWidth: "60%",
-      itemStyle: { color: pal[colorKey] },
-      data: prompts.map((p, i) => {
-        const vals = [p.apiMs, p.toolMs, p.hookMs];
-        const sum = vals.reduce((a, v) => a + v, 0);
-        return {
-          value: vals[seriesIdx],
-          sum,
-          tipText: `${names[i]}\n${label}: ${fmtMs(vals[seriesIdx]!)}\nAPI calls ${p.apiCalls}, tool calls ${p.toolCalls}\nWall clock ~${fmtMs(p.wallMs)}, cost ${usd(p.costUsd)}`,
-        };
-      }),
-      // Only the last stacked series sits at the bar's far end, so the running total goes there.
-      label:
-        seriesIdx === PARTS.length - 1
-          ? { show: true, position: "right", color: pal.ink2, fontSize: 11, fontFamily: FONT, formatter: (p: any) => fmtMs(p.data.sum as number) }
-          : undefined,
-    })),
-  };
 }
 
 // Agent and compaction spans share the muted color; the legend groups them as one entry.

@@ -1,0 +1,8 @@
+{
+  "title": "Current dashboard",
+  "direction": "Today's apps/dashboard: header, setup, hosts, live feed, then one long stack of glass cards.",
+  "status": "baseline",
+  "versions": { "v1": {} },
+  "proposed": [],
+  "notes": "Reproduced with sample data; charts drawn as static SVG/CSS instead of ECharts."
+}

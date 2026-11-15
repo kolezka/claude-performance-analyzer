@@ -1,0 +1,14 @@
+{
+  "title": "Console",
+  "direction": "App shell with a left nav (Overview, Turns, Hooks, Tools, Models, Errors, Setup) and a permanent live rail on the right.",
+  "status": "candidate",
+  "versions": { "v1": { "parent": { "draft": "current", "version": 1 } } },
+  "tokens": "slate neutrals, GitHub-dark style #0d1117 dark surface, hairline grid KPIs, JetBrains Mono for numbers",
+  "proposed": [
+    "Separate pages per area (needs a client-side router or hash routes)",
+    "KPI sparklines (needs per-bucket series for turn time and hook time; only API latency has a series today)",
+    "Error marker on the latency chart from api_error timestamps",
+    "Slowest turns table from /api/turns?sort=slowest"
+  ],
+  "notes": "Remote hosts and telemetry settings become pages instead of cards above the data."
+}

@@ -1,0 +1,14 @@
+{
+  "title": "Triage",
+  "direction": "Answer first: a plain-language verdict and a 'worth a look' list on top, then a turns list beside the selected turn's waterfall.",
+  "status": "candidate",
+  "versions": { "v1": { "parent": { "draft": "current", "version": 1 } } },
+  "tokens": "stone neutrals, white panels, 12px radius, mono numbers, api/tools/hooks colours kept",
+  "proposed": [
+    "Verdict sentence generated from kpis + slowest hook (client-side, data exists)",
+    "'Worth a look' list from /api/item finding, errors and mcpConnections (needs a ranking rule)",
+    "Turns list with Recent/Slowest from /api/turns (endpoint exists, web UI does not use it)",
+    "PreToolUse/PostToolUse hook time drawn on the tool row (TurnRow.pre/post exists)"
+  ],
+  "notes": "Setup card shrinks to a one-line banner; hosts move into the header select."
+}

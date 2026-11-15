@@ -1,0 +1,14 @@
+{
+  "title": "Session timeline",
+  "direction": "Time is the axis: every session gets a lane with its turns as bars across the window; pick a turn to see its waterfall below.",
+  "status": "candidate",
+  "versions": { "v1": { "parent": { "draft": "current", "version": 1 } } },
+  "tokens": "neutral greys on white, flat, no cards, hairline separators, mono numbers",
+  "proposed": [
+    "Session lanes grouped by repo (needs /api/turns with sessionId and repo for the whole window, limit is 50 today)",
+    "Host pills instead of a select",
+    "Idle gaps drawn in the waterfall (gaps exist in /api/turn)",
+    "'This turn vs the hour' comparison panel"
+  ],
+  "notes": "KPIs collapse into one headline line under the header."
+}

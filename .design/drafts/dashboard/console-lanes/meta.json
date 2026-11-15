@@ -1,0 +1,19 @@
+{
+  "title": "Console: session lanes",
+  "direction": "Same console shell. Overview shows each session as a lane of turn bars across the window; clicking a turn opens its waterfall below, with idle time shown separately.",
+  "status": "candidate",
+  "versions": {
+    "v1": {
+      "parent": {
+        "draft": "console",
+        "version": 1
+      }
+    }
+  },
+  "tokens": "slate neutrals, GitHub-dark style #0d1117 dark surface, hairline grid KPIs, JetBrains Mono for numbers",
+  "proposed": [
+    "Lanes from /api/turns grouped by session/repo",
+    "Waterfall from /api/turn with activeMs/idleMs",
+    "KPIs collapsed to one line"
+  ]
+}

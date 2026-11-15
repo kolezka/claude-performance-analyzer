@@ -82,6 +82,16 @@ test("summarize ranks hooks and tools by total time and splits turn time", () =>
   expect(out.models.map((m) => m.name)).toEqual(["claude-sonnet-5"]);
 });
 
+test("summarize splits cost and tokens per model", () => {
+  const out = summarize(parseLogs(payload), [], 3600_000, NOW);
+  const extra = out.models[0]!.extra!;
+  expect(extra.costUsd).toBeCloseTo(0.03);
+  expect(extra.input).toBe(100);
+  expect(extra.output).toBe(50);
+  expect(extra.cacheRead).toBe(900);
+  expect(extra.cacheCreation).toBe(0);
+});
+
 test("status flags slow hooks for the menu bar", () => {
   const st = status(summarize(parseLogs(payload), [], 15 * 60_000, NOW));
   expect(st.state).toBe("slow");

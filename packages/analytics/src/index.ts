@@ -338,10 +338,16 @@ export function summarize(events: EventRow[], spans: SpanRow[], windowMs: number
     switch (e.name) {
       case "api_request": {
         const ms = num(a.duration_ms);
-        api.get(String(a.model ?? "unknown")).add(ms);
+        const model = api.get(String(a.model ?? "unknown"));
+        model.add(ms);
         const b = Math.floor(e.tsMs / bucketMs) * bucketMs;
         (apiBuckets.get(b) ?? apiBuckets.set(b, []).get(b)!).push(ms);
         const cost = num(a.cost_usd);
+        model.bump("costUsd", cost);
+        model.bump("input", num(a.input_tokens));
+        model.bump("output", num(a.output_tokens));
+        model.bump("cacheRead", num(a.cache_read_tokens));
+        model.bump("cacheCreation", num(a.cache_creation_tokens));
         costUsd += cost;
         tokens.input += num(a.input_tokens);
         tokens.output += num(a.output_tokens);

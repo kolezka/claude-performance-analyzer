@@ -1,0 +1,12 @@
+{
+  "title": "Models: paper",
+  "direction": "Per-model latency, latency over time per model, tokens, cache and cost.",
+  "status": "selected",
+  "variant": "paper",
+  "versions": {
+    "v1": {}
+  },
+  "proposed": [
+    "Per-model time series: apiSeries is not split by model today"
+  ]
+}

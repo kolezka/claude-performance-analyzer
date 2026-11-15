@@ -1,0 +1,12 @@
+{
+  "title": "Telemetry settings: paper",
+  "direction": "Which telemetry keys are set, what each enables, one button to add the missing ones.",
+  "status": "selected",
+  "variant": "paper",
+  "versions": {
+    "v1": {}
+  },
+  "proposed": [
+    "Collector info (DB size, retention) is not exposed by /api/status yet"
+  ]
+}

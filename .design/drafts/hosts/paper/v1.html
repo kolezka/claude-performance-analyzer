@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Remote hosts: paper</title>
+<script>document.documentElement.classList.toggle("dark", new URLSearchParams(location.search).get("theme") === "dark");</script>
+<script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4.3.3"></script>
+<style type="text/tailwindcss">
+  @custom-variant dark (&:where(.dark, .dark *));
+  @theme {
+    --font-sans: ui-sans-serif, system-ui, sans-serif;
+    --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+    --color-api: #3b6fd4; --color-tools: #d26a2c; --color-hooks: #2a9a6b; --color-warn: #b07d14; --color-crit: #d24b46;
+    --color-slate-50:#f7f4ee;--color-slate-100:#efeae1;--color-slate-200:#e2dbcf;--color-slate-300:#cfc6b6;--color-slate-400:#968b78;--color-slate-500:#6b6253;--color-slate-600:#5e5649;--color-slate-700:#463f35;--color-slate-900:#26211b;--color-white:#fffdf8;
+    --font-serif:"Iowan Old Style","Charter",Georgia,serif;
+    --radius-sm:4px;--radius-md:8px;--radius-lg:12px;
+  }
+  h1, h2 { font-family: var(--font-serif); font-weight: 600; letter-spacing: -0.01em; }
+  h1 { font-size: 18px !important; }
+  @utility navitem { @apply flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-slate-600 hover:bg-slate-200/70 dark:text-slate-400 dark:hover:bg-white/5; }
+  @utility th { @apply py-1.5 pr-3 text-left text-[11px] font-medium text-slate-500 dark:text-slate-500; }
+  @utility td { @apply border-t border-slate-200 py-1.5 pr-3 dark:border-white/5; }
+</style>
+</head>
+<body class="bg-slate-50 text-slate-900 dark:bg-[#1c1813] dark:text-slate-200 text-[13px] antialiased">
+<div class="flex min-h-screen">
+
+  <aside class="hidden w-56 shrink-0 flex-col border-r border-slate-200 bg-slate-100 md:flex dark:border-[#3a3226] dark:bg-[#14110d]">
+    <div class="px-4 pt-4 pb-3">
+      <div class="font-mono text-[13px] font-semibold tracking-tight">cc<span class="text-api">/</span>speed</div>
+      <select class="mt-3 w-full rounded-md border border-slate-300 bg-white px-2 py-1.5 text-xs dark:border-[#3a3226] dark:bg-[#2a241c]">
+        <option>This Mac</option><option>studio-mini</option><option>ci-runner-02</option>
+      </select>
+    </div>
+    <nav class="flex-1 space-y-0.5 px-2 text-[13px]">
+      <a class="navitem" href="#">
+        <svg class="size-4" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 13V7m4 6V3m4 10V9m4 4V5"/></svg>Overview</a>
+      <a class="navitem" href="#"><svg class="size-4" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 4h8M4 8h10M3 12h6"/></svg>Turns<span class="ml-auto font-mono text-[11px] text-slate-400">38</span></a>
+      <a class="navitem" href="#"><svg class="size-4" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M5 2v5a3 3 0 0 0 6 0V2M8 10v4"/></svg>Hooks<span class="ml-auto size-1.5 rounded-full bg-warn"></span></a>
+      <a class="navitem" href="#"><svg class="size-4" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M10 2l4 4-8 8H2v-4z"/></svg>Tools &amp; MCP</a>
+      <a class="navitem" href="#"><svg class="size-4" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="5.5"/><path d="M8 5v3l2 1"/></svg>Models</a>
+      <a class="navitem" href="#"><svg class="size-4" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M8 2l6 11H2z"/></svg>Errors<span class="ml-auto font-mono text-[11px] text-crit">4</span></a>
+      <div class="px-2.5 pt-4 pb-1 text-[11px] font-medium text-slate-400 dark:text-slate-500">Setup</div>
+      <a class="navitem bg-white font-medium text-slate-900! shadow-sm ring-1 ring-slate-200 dark:bg-api/15 dark:ring-api/30 dark:text-white!" href="#"><svg class="size-4" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="3" width="12" height="8" rx="1"/><path d="M5 14h6"/></svg>Remote hosts<span class="ml-auto font-mono text-[11px] text-slate-400">2</span></a>
+      <a class="navitem" href="#"><svg class="size-4" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="2"/><path d="M8 1v2m0 10v2M1 8h2m10 0h2"/></svg>Telemetry settings<span class="ml-auto rounded bg-api/15 px-1 font-mono text-[10px] text-api">3</span></a>
+    </nav>
+    <div class="border-t border-slate-200 p-3 dark:border-[#3a3226]">
+      <div class="flex items-center gap-2 text-xs"><span class="size-2 animate-pulse rounded-full bg-hooks"></span><span class="font-medium">Live</span><span class="text-slate-500">last event 4s ago</span></div>
+      <div class="mt-2 font-mono text-[11px] text-slate-500">2,418 events · 20:31</div>
+    </div>
+  </aside>
+
+  <div class="min-w-0 flex-1">
+    <header class="flex items-center gap-3 border-b border-slate-200 px-6 py-3 dark:border-[#3a3226]">
+      <h1 class="text-[15px] font-semibold">Remote hosts</h1>
+      <nav class="ml-auto flex rounded-md bg-slate-200/70 p-0.5 font-mono text-xs dark:bg-[#2a241c]">
+        <button class="rounded px-2.5 py-1 text-slate-500">15m</button>
+        <button class="rounded bg-white px-2.5 py-1 font-semibold shadow-sm dark:bg-white/15">1h</button>
+        <button class="rounded px-2.5 py-1 text-slate-500">24h</button>
+        <button class="rounded px-2.5 py-1 text-slate-500">7d</button>
+      </nav>
+    </header>
+
+    <div class="grid xl:grid-cols-[1fr_340px]">
+      <div class="min-w-0 space-y-6 p-6">
+        <section>
+          <div class="mb-2 flex items-baseline gap-3"><h2 class="font-semibold">Hosts</h2><span class="text-xs text-slate-500">machines sending telemetry to this collector over Tailscale</span></div>
+          <div class="divide-y divide-slate-200 rounded-lg border border-slate-200 text-xs dark:divide-[#3a3226] dark:border-[#3a3226]">
+            <div class="flex items-center gap-3 px-4 py-3"><span class="size-2 rounded-full bg-hooks"></span><div><div class="text-[13px] font-medium">This Mac</div><div class="text-slate-500">local · last event 4s ago</div></div><span class="ml-auto font-mono text-slate-500">2,418 events</span></div>
+            <div class="flex items-center gap-3 px-4 py-3"><span class="size-2 rounded-full bg-hooks"></span><div><div class="text-[13px] font-medium">ci-runner-02</div><div class="text-slate-500">100.86.12.40 · last event 6m ago</div></div><span class="ml-auto font-mono text-slate-500">612 events</span><button class="rounded-md border border-slate-300 px-2 py-1 dark:border-[#3a3226]">Rotate token</button></div>
+            <div class="flex items-center gap-3 px-4 py-3"><span class="size-2 rounded-full border border-slate-400"></span><div><div class="text-[13px] font-medium">studio-mini</div><div class="text-slate-500">added 20:02 · no telemetry yet</div></div><span class="ml-auto rounded bg-warn/15 px-1.5 py-0.5 text-warn">waiting</span><button class="rounded-md border border-slate-300 px-2 py-1 dark:border-[#3a3226]">Show setup</button></div>
+          </div>
+        </section>
+        <section class="rounded-lg border border-slate-200 dark:border-[#3a3226]">
+          <div class="border-b border-slate-200 px-4 py-2.5 dark:border-[#3a3226]"><h2 class="font-semibold">Add a host</h2></div>
+          <div class="flex flex-wrap items-end gap-3 p-4 text-xs">
+            <label class="grid gap-1"><span class="text-slate-500">Name</span><input class="w-56 rounded-md border border-slate-300 bg-white px-2 py-1.5 font-mono dark:border-[#3a3226] dark:bg-[#2a241c]" value="mbp-office"></label>
+            <button class="rounded-md bg-api px-3 py-1.5 font-medium text-white">Create token</button>
+          </div>
+          <div class="mx-4 mb-4 rounded-md border border-dashed border-slate-300 p-3 text-xs dark:border-[#3a3226]">
+            <div class="mb-2 flex items-baseline"><span class="font-medium">studio-mini</span><span class="ml-2 text-slate-500">Paste into <span class="font-mono">~/.claude/settings.json</span> under <span class="font-mono">env</span> on that machine, then restart Claude Code. The token is shown once.</span><button class="ml-auto rounded-md border border-slate-300 px-2 py-0.5 dark:border-[#3a3226]">Copy</button></div>
+            <pre class="overflow-x-auto rounded bg-slate-100 p-3 font-mono text-[11px] leading-relaxed dark:bg-black/30">"CLAUDE_CODE_ENABLE_TELEMETRY": "1",
+"OTEL_EXPORTER_OTLP_ENDPOINT": "http://100.64.0.7:4318",
+"OTEL_EXPORTER_OTLP_HEADERS": "Authorization=Bearer ccs_••••••••3f9a",
+"OTEL_RESOURCE_ATTRIBUTES": "host.name=studio-mini"</pre>
+          </div>
+        </section>
+      </div>
+
+      <!-- Live rail -->
+      <aside class="border-t border-slate-200 p-5 xl:border-t-0 xl:border-l dark:border-[#3a3226]">
+        <div class="flex items-center gap-2"><h2 class="font-semibold">Live</h2><span class="ml-auto text-xs text-slate-500">This Mac</span></div>
+        <div class="mt-3 rounded-md border border-warn/40 bg-warn/10 px-3 py-2 text-xs"><span class="font-mono">PreToolUse:Bash</span> running <span class="font-mono font-semibold">1.2s</span></div>
+        <ol class="mt-3 space-y-px font-mono text-xs text-slate-700 dark:text-slate-300">
+          <li class="grid grid-cols-[58px_1fr_44px] items-center gap-2 rounded bg-api/10 px-1.5 py-1"><span class="text-slate-500">20:31:07</span><span class="truncate"><span class="text-api">api</span> opus-5-5 1,204 tok</span><span class="text-right">8.4s</span></li>
+          <li class="grid grid-cols-[58px_1fr_44px] items-center gap-2 px-1.5 py-1"><span class="text-slate-500">20:31:05</span><span class="truncate"><span class="text-tools">tool</span> Bash bun test</span><span class="text-right">3.1s</span></li>
+          <li class="grid grid-cols-[58px_1fr_44px] items-center gap-2 px-1.5 py-1"><span class="text-slate-500">20:31:02</span><span class="truncate"><span class="text-hooks">hook</span> PreToolUse:Bash</span><span class="text-right text-warn">2.8s</span></li>
+          <li class="grid grid-cols-[58px_1fr_44px] items-center gap-2 px-1.5 py-1"><span class="text-slate-500">20:30:58</span><span class="truncate text-crit">err API error 529</span><span class="text-right">0.4s</span></li>
+          <li class="grid grid-cols-[58px_1fr_44px] items-center gap-2 px-1.5 py-1"><span class="text-slate-500">20:30:51</span><span class="truncate"><span class="text-slate-400">agent</span> Explore</span><span class="text-right">40.2s</span></li>
+          <li class="grid grid-cols-[58px_1fr_44px] items-center gap-2 px-1.5 py-1"><span class="text-slate-500">20:30:44</span><span class="truncate"><span class="text-tools">tool</span> mcp__outline__list_documents</span><span class="text-right">2.2s</span></li>
+          <li class="grid grid-cols-[58px_1fr_44px] items-center gap-2 px-1.5 py-1"><span class="text-slate-500">20:30:40</span><span class="truncate"><span class="text-slate-400">skill</span> design-studio</span><span class="text-right"></span></li>
+          <li class="grid grid-cols-[58px_1fr_44px] items-center gap-2 px-1.5 py-1"><span class="text-slate-500">20:30:38</span><span class="truncate"><span class="text-slate-400">prompt</span> 412 chars</span><span class="text-right"></span></li>
+        </ol>
+        <div class="mt-5 rounded-md border border-dashed border-slate-300 p-3 text-xs text-slate-500 dark:border-white/15">
+          <div class="font-medium text-slate-700 dark:text-slate-300">studio-mini</div>
+          No telemetry yet. Paste its env block into <code class="font-mono">~/.claude/settings.json</code> there and restart Claude Code.
+        </div>
+      </aside>
+    </div>
+  </div>
+</div>
+</body>
+</html>
