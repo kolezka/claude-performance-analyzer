@@ -153,7 +153,17 @@ pre {
 @media (min-width: 1280px) { .content-grid { grid-template-columns: minmax(0, 1fr) 340px; } }
 .page { min-width: 0; padding: 24px; }
 .rail { border-top: 1px solid var(--hairline); padding: 20px; }
-@media (min-width: 1280px) { .rail { border-top: 0; border-left: 1px solid var(--hairline); } }
+@media (min-width: 1280px) {
+  /* The rail stays in view while the page scrolls; the feed takes the leftover height. */
+  .rail {
+    border-top: 0; border-left: 1px solid var(--hairline);
+    position: sticky; top: 0; align-self: start; height: 100vh;
+    display: flex; flex-direction: column; overflow: hidden;
+  }
+  .rail .feed { flex: 1; max-height: none; min-height: 0; padding-bottom: 12px;
+    mask-image: linear-gradient(to bottom, #000 calc(100% - 24px), transparent); }
+}
+input[type="checkbox"], input[type="radio"] { accent-color: var(--api); }
 @media (max-width: 767px) {
   .shell { flex-direction: column; }
   .sidebar { width: auto; height: auto; position: static; border-right: 0; border-bottom: 1px solid var(--hairline); }
@@ -193,7 +203,7 @@ label.check { display: inline-flex; align-items: center; gap: 6px; font-size: 12
 .panel.dashed { border-style: dashed; border-color: var(--hairline-strong); background: transparent; color: var(--muted); }
 .panel.warn { border-color: color-mix(in srgb, var(--warn) 40%, transparent); background: color-mix(in srgb, var(--warn) 10%, transparent); }
 .panel.crit { border-color: color-mix(in srgb, var(--critical) 40%, transparent); background: color-mix(in srgb, var(--critical) 8%, transparent); }
-.badge { display: inline-block; border-radius: var(--r-sm); padding: 0 5px; font-size: 10px; font-family: var(--mono); background: var(--raised); color: var(--muted); border: 1px solid var(--hairline); }
+.badge { display: inline-block; white-space: nowrap; border-radius: var(--r-sm); padding: 0 5px; font-size: 10px; font-family: var(--mono); background: var(--raised); color: var(--muted); border: 1px solid var(--hairline); }
 .badge.warn { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 40%, transparent); background: color-mix(in srgb, var(--warn) 10%, transparent); }
 .badge.crit { color: var(--critical); border-color: color-mix(in srgb, var(--critical) 40%, transparent); background: color-mix(in srgb, var(--critical) 8%, transparent); }
 .badge.ok { color: var(--hooks); border-color: color-mix(in srgb, var(--hooks) 40%, transparent); background: color-mix(in srgb, var(--hooks) 10%, transparent); }
@@ -248,7 +258,7 @@ tr.running td:first-child { box-shadow: inset 2px 0 0 var(--warn); }
 .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
 
 /* echarts containers: fixed-size ones get a height here, variable-row ones get it from JS. */
-#c-latency { height: 170px; }
+#c-latency, #c-model-latency { height: 170px; }
 #c-breakdown { height: 44px; }
 .chart-frame { border: 1px solid var(--hairline); border-radius: var(--r-lg); padding: 10px 12px; background: var(--surface); }
 

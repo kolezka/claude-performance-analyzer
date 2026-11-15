@@ -8,7 +8,8 @@ export class PageLoader {
   private gate = new RequestGate();
   private scope: string | null = null;
 
-  constructor(private fetchFn: FetchFn = (...args) => fetch(...args)) {}
+  // Late-bound so tests that stub globalThis.fetch after construction still hit the stub.
+  constructor(private fetchFn: FetchFn = ((...args: Parameters<typeof fetch>) => fetch(...args)) as typeof fetch) {}
 
   // Returns false when the answer went stale. Errors go to fail with the HTTP status (null = no answer).
   load<T>(scope: string, url: string, ok: (value: T) => void, fail?: (error: string, status: number | null) => void): Promise<boolean> {

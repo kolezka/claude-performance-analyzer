@@ -129,7 +129,7 @@
         <li class:fresh={e.fresh} class:bad={!e.ok}>
           <span class="t">{clockSec(e.tsMs)}</span>
           <span class="lbl truncate" title={e.label}
-            ><span class={KIND_CLASS[e.kind] ?? "k-other"}>{e.kind === "error" ? "err" : e.kind}</span> {e.label}{e.ok || e.label.endsWith("failed") ? "" : " (failed)"}</span
+            ><span class={KIND_CLASS[e.kind] ?? "k-other"}>{e.kind === "error" ? "err" : e.kind}</span> {e.label.startsWith(`${e.kind} `) ? e.label.slice(e.kind.length + 1) : e.label}{e.ok || e.label.endsWith("failed") ? "" : " (failed)"}</span
           >
           <span class="ms" class:slow={e.kind === "hook" && (e.ms ?? 0) > SLOW_HOOK_MS}>{e.ms ? fmtMs(e.ms) : ""}</span>
         </li>
