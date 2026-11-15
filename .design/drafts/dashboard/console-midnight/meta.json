@@ -1,0 +1,22 @@
+{
+  "title": "Console: midnight",
+  "direction": "Same console layout and content. Dark-first deep indigo with brighter signal colours and a faint glow on live and warning states. Built for a second monitor left on all day.",
+  "status": "candidate",
+  "versions": {
+    "v1": {
+      "parent": {
+        "draft": "console",
+        "version": 1
+      }
+    }
+  },
+  "tokens": {
+    "bg-dark": "#0e0f24",
+    "sidebar-dark": "#090a1a",
+    "api": "#7aa2ff",
+    "tools": "#ffaa66",
+    "hooks": "#4fe3a1",
+    "warn": "#ffd166",
+    "crit": "#ff6b7a"
+  }
+}

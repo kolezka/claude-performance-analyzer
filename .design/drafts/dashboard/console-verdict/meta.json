@@ -1,0 +1,19 @@
+{
+  "title": "Console: verdict first",
+  "direction": "Same console shell. Overview opens with a one-sentence verdict, time split bar and a 'worth a look' list, then a quieter KPI grid, slowest turns and latency.",
+  "status": "candidate",
+  "versions": {
+    "v1": {
+      "parent": {
+        "draft": "console",
+        "version": 1
+      }
+    }
+  },
+  "tokens": "slate neutrals, GitHub-dark style #0d1117 dark surface, hairline grid KPIs, JetBrains Mono for numbers",
+  "proposed": [
+    "Verdict sentence generated from /api/summary (largest share + top hook)",
+    "'Worth a look' findings from /api/item finding field",
+    "KPI tiles drop sparklines (no new time series needed)"
+  ]
+}

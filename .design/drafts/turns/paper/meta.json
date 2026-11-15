@@ -1,0 +1,13 @@
+{
+  "title": "Turns: paper",
+  "direction": "Every turn in the window with active vs idle time, filterable, recent or slowest.",
+  "status": "selected",
+  "variant": "paper",
+  "versions": {
+    "v1": {}
+  },
+  "proposed": [
+    "List from /api/turns (sort recent|slowest, activeMs, idleMs, repo, branch, inProgress)",
+    "Repo filter and headless toggle are client-side"
+  ]
+}

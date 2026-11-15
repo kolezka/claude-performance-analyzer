@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dashboard: triage</title>
+<script>document.documentElement.classList.toggle("dark", new URLSearchParams(location.search).get("theme") === "dark");</script>
+<script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4.3.3"></script>
+<style type="text/tailwindcss">
+  @custom-variant dark (&:where(.dark, .dark *));
+  @theme {
+    --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+    --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
+    --color-api: #2f6fd0; --color-tools: #e0662f; --color-hooks: #17a06f; --color-warn: #d99a06; --color-crit: #d03b3b;
+  }
+  @utility panel { @apply rounded-xl border border-stone-200 bg-white dark:border-stone-800 dark:bg-stone-900; }
+  @utility eyebrow { @apply text-[11px] font-medium uppercase tracking-wider text-stone-500 dark:text-stone-400; }
+</style>
+</head>
+<body class="bg-stone-100 text-stone-900 dark:bg-stone-950 dark:text-stone-100 text-[13px] antialiased">
+
+<header class="sticky top-0 z-10 border-b border-stone-200 bg-stone-100/90 backdrop-blur dark:border-stone-800 dark:bg-stone-950/90">
+  <div class="mx-auto flex max-w-[1280px] flex-wrap items-center gap-3 px-6 py-3">
+    <div class="flex items-center gap-2">
+      <svg viewBox="0 0 20 20" class="size-5 text-api"><path fill="currentColor" d="M10 2a8 8 0 1 0 8 8h-2a6 6 0 1 1-6-6V2Zm0 4v4l3 2-1 1.6L8 11V6h2Z"/></svg>
+      <h1 class="text-[15px] font-semibold">Claude Code speed</h1>
+    </div>
+    <select class="rounded-md border border-stone-300 bg-white px-2 py-1 text-xs dark:border-stone-700 dark:bg-stone-900"><option>This Mac</option><option>studio-mini</option><option>ci-runner-02</option></select>
+    <nav class="flex rounded-md border border-stone-300 bg-white p-0.5 text-xs dark:border-stone-700 dark:bg-stone-900">
+      <button class="rounded px-2.5 py-0.5 text-stone-500">15m</button>
+      <button class="rounded bg-stone-900 px-2.5 py-0.5 font-medium text-white dark:bg-stone-100 dark:text-stone-900">1h</button>
+      <button class="rounded px-2.5 py-0.5 text-stone-500">24h</button>
+      <button class="rounded px-2.5 py-0.5 text-stone-500">7d</button>
+    </nav>
+    <div class="ml-auto flex items-center gap-3 text-xs">
+      <span class="flex items-center gap-1.5 rounded-full bg-amber-100 px-2.5 py-1 text-amber-900 dark:bg-amber-500/15 dark:text-amber-300"><span class="size-1.5 animate-pulse rounded-full bg-warn"></span>PreToolUse:Bash running 1.2s</span>
+      <span class="flex items-center gap-1.5 text-stone-500 dark:text-stone-400"><span class="size-2 rounded-full bg-hooks"></span>Live · 4s ago</span>
+    </div>
+  </div>
+</header>
+
+<main class="mx-auto max-w-[1280px] space-y-5 px-6 py-5">
+
+  <!-- Setup nudge, slim -->
+  <div class="flex flex-wrap items-center gap-3 rounded-lg border border-api/30 bg-api/5 px-4 py-2.5 dark:bg-api/10">
+    <span class="text-stone-700 dark:text-stone-200">Traces are off, so time to first token is unknown. 3 settings missing in <code class="font-mono text-xs">~/.claude/settings.json</code>.</span>
+    <button class="ml-auto rounded-md bg-api px-3 py-1 text-xs font-semibold text-white">Add 3 missing settings</button>
+    <span class="text-xs text-stone-500 dark:text-stone-400">Backup first, existing values kept.</span>
+  </div>
+
+  <!-- Verdict -->
+  <section class="grid gap-4 lg:grid-cols-[1.3fr_1fr]">
+    <div class="panel p-5">
+      <div class="eyebrow">Last hour on This Mac</div>
+      <p class="mt-2 text-[22px] leading-tight font-semibold tracking-tight">Turns take <span class="text-api">38s</span> at p50. Hooks eat <span class="text-warn">17%</span> of that, most of it in <span class="font-mono text-[19px]">PreToolUse:Bash</span>.</p>
+      <div class="mt-4 flex h-3 overflow-hidden rounded-full">
+        <div class="bg-api" style="width:58%"></div><div class="bg-tools" style="width:25%"></div><div class="bg-hooks" style="width:17%"></div>
+      </div>
+      <div class="mt-2 flex gap-4 text-xs text-stone-600 dark:text-stone-300">
+        <span><i class="mr-1 inline-block size-2 rounded-sm bg-api"></i>Model 58% · 11m 02s</span>
+        <span><i class="mr-1 inline-block size-2 rounded-sm bg-tools"></i>Tools 25% · 4m 45s</span>
+        <span><i class="mr-1 inline-block size-2 rounded-sm bg-hooks"></i>Hooks 17% · 3m 12s</span>
+      </div>
+    </div>
+    <div class="panel divide-y divide-stone-200 dark:divide-stone-800">
+      <div class="eyebrow px-4 pt-3 pb-2">Worth a look</div>
+      <a class="flex gap-3 px-4 py-2.5 hover:bg-stone-50 dark:hover:bg-stone-800/60" href="#">
+        <span class="mt-0.5 size-2 shrink-0 rounded-full bg-warn"></span>
+        <span class="min-w-0"><span class="font-mono text-xs">PreToolUse:Bash</span> p95 2.8s over 61 calls<br><span class="text-xs text-stone-500 dark:text-stone-400">Slow only in claude-performance-analyzer: hindsight recall runs on every Bash call</span></span>
+        <span class="ml-auto text-stone-400">›</span></a>
+      <a class="flex gap-3 px-4 py-2.5 hover:bg-stone-50 dark:hover:bg-stone-800/60" href="#">
+        <span class="mt-0.5 size-2 shrink-0 rounded-full bg-crit"></span>
+        <span class="min-w-0">4 API errors (529 overloaded)<br><span class="text-xs text-stone-500 dark:text-stone-400">All between 20:28 and 20:31, claude-opus-5-5</span></span>
+        <span class="ml-auto text-stone-400">›</span></a>
+      <a class="flex gap-3 px-4 py-2.5 hover:bg-stone-50 dark:hover:bg-stone-800/60" href="#">
+        <span class="mt-0.5 size-2 shrink-0 rounded-full bg-stone-400"></span>
+        <span class="min-w-0">MCP <span class="font-mono text-xs">outline</span> took 6.4s to connect<br><span class="text-xs text-stone-500 dark:text-stone-400">1 of 3 connects failed</span></span>
+        <span class="ml-auto text-stone-400">›</span></a>
+    </div>
+  </section>
+
+  <!-- KPI strip -->
+  <section class="panel grid grid-cols-2 divide-stone-200 sm:grid-cols-3 lg:grid-cols-6 lg:divide-x dark:divide-stone-800">
+    <div class="p-4"><div class="eyebrow">API p50</div><div class="mt-1 font-mono text-xl font-semibold">4.2s</div><div class="text-xs text-stone-500 dark:text-stone-400">p95 9.8s · 142 req</div></div>
+    <div class="p-4"><div class="eyebrow">Turn p50</div><div class="mt-1 font-mono text-xl font-semibold">38.0s</div><div class="text-xs text-stone-500 dark:text-stone-400">38 prompts · 4 sessions</div></div>
+    <div class="p-4"><div class="eyebrow">First token</div><div class="mt-1 font-mono text-xl font-semibold text-stone-400">n/a</div><div class="text-xs text-stone-500 dark:text-stone-400">needs traces (beta)</div></div>
+    <div class="p-4"><div class="eyebrow text-warn!">Hook time</div><div class="mt-1 font-mono text-xl font-semibold">3m 12s</div><div class="text-xs text-stone-500 dark:text-stone-400">17% of in-turn time</div></div>
+    <div class="p-4"><div class="eyebrow">Cost</div><div class="mt-1 font-mono text-xl font-semibold">$4.12</div><div class="text-xs text-stone-500 dark:text-stone-400">182k out · 2.1M in</div></div>
+    <div class="p-4"><div class="eyebrow">Cache hit</div><div class="mt-1 font-mono text-xl font-semibold">91%</div><div class="text-xs text-stone-500 dark:text-stone-400">1.9M read · 140k write</div></div>
+  </section>
+
+  <!-- Turns + waterfall -->
+  <section class="panel grid lg:grid-cols-[400px_1fr]">
+    <div class="border-b border-stone-200 lg:border-r lg:border-b-0 dark:border-stone-800">
+      <div class="flex items-center gap-2 px-4 py-3">
+        <h2 class="font-semibold">Turns</h2>
+        <div class="ml-auto flex rounded-md border border-stone-300 p-0.5 text-xs dark:border-stone-700">
+          <button class="rounded px-2 py-0.5 text-stone-500">Recent</button>
+          <button class="rounded bg-stone-200 px-2 py-0.5 font-medium dark:bg-stone-700">Slowest</button>
+        </div>
+      </div>
+      <ul class="text-xs">
+        <li class="border-l-2 border-api bg-api/5 px-4 py-2.5 dark:bg-api/10">
+          <div class="flex items-baseline gap-2"><span class="font-mono font-semibold text-[13px]">/review</span><span class="text-stone-500 dark:text-stone-400">claude-performance-analyzer</span><span class="ml-auto font-mono font-semibold">2m 14s</span></div>
+          <div class="mt-1.5 flex h-1.5 overflow-hidden rounded-full bg-stone-200 dark:bg-stone-800"><div class="bg-api" style="width:52%"></div><div class="bg-tools" style="width:22%"></div><div class="bg-hooks" style="width:21%"></div></div>
+          <div class="mt-1 text-stone-500 dark:text-stone-400">20:28 · interactive · 41s idle not counted</div></li>
+        <li class="px-4 py-2.5 hover:bg-stone-50 dark:hover:bg-stone-800/60">
+          <div class="flex items-baseline gap-2"><span class="font-medium text-[13px]">prompt, 412 chars</span><span class="text-stone-500 dark:text-stone-400">design-studio</span><span class="ml-auto font-mono">1m 52s</span></div>
+          <div class="mt-1.5 flex h-1.5 overflow-hidden rounded-full bg-stone-200 dark:bg-stone-800"><div class="bg-api" style="width:70%"></div><div class="bg-tools" style="width:20%"></div><div class="bg-hooks" style="width:6%"></div></div>
+          <div class="mt-1 text-stone-500 dark:text-stone-400">20:12 · interactive</div></li>
+        <li class="px-4 py-2.5 hover:bg-stone-50 dark:hover:bg-stone-800/60">
+          <div class="flex items-baseline gap-2"><span class="font-mono text-[13px]">/load</span><span class="text-stone-500 dark:text-stone-400">tmuxaxxing</span><span class="ml-auto font-mono">58s</span></div>
+          <div class="mt-1.5 flex h-1.5 overflow-hidden rounded-full bg-stone-200 dark:bg-stone-800"><div class="bg-api" style="width:40%"></div><div class="bg-tools" style="width:48%"></div><div class="bg-hooks" style="width:9%"></div></div>
+          <div class="mt-1 text-stone-500 dark:text-stone-400">19:57 · headless SDK</div></li>
+        <li class="px-4 py-2.5 hover:bg-stone-50 dark:hover:bg-stone-800/60">
+          <div class="flex items-baseline gap-2"><span class="font-medium text-[13px]">prompt, 88 chars</span><span class="text-stone-500 dark:text-stone-400">claude-performance-analyzer</span><span class="ml-auto flex items-center gap-1 font-mono text-api"><span class="size-1.5 animate-pulse rounded-full bg-api"></span>running 21s</span></div>
+          <div class="mt-1.5 flex h-1.5 overflow-hidden rounded-full bg-stone-200 dark:bg-stone-800"><div class="bg-api" style="width:30%"></div><div class="bg-hooks" style="width:12%"></div></div>
+          <div class="mt-1 text-stone-500 dark:text-stone-400">20:31 · interactive</div></li>
+      </ul>
+    </div>
+    <div class="min-w-0 p-4">
+      <div class="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+        <h2 class="font-mono font-semibold">/review</h2>
+        <span class="text-xs text-stone-500 dark:text-stone-400">claude-performance-analyzer · main · 2m 14s active, 41s idle</span>
+      </div>
+      <div class="mt-3 space-y-1 font-mono text-[11px]">
+        <div class="grid grid-cols-[140px_1fr_56px] items-center gap-2"><span class="truncate text-stone-500">UserPromptSubmit</span><div class="relative h-4"><div class="absolute h-4 rounded-sm bg-hooks" style="left:0%;width:3%"></div></div><span class="text-right">4.1s</span></div>
+        <div class="grid grid-cols-[140px_1fr_56px] items-center gap-2"><span class="truncate text-stone-500">claude-opus-5-5</span><div class="relative h-4"><div class="absolute h-4 rounded-sm bg-api" style="left:3%;width:14%"></div></div><span class="text-right">18.9s</span></div>
+        <div class="grid grid-cols-[140px_1fr_56px] items-center gap-2"><span class="truncate text-stone-500">Bash git diff main</span><div class="relative h-4"><div class="absolute h-4 rounded-l-sm bg-hooks" style="left:17%;width:2%"></div><div class="absolute h-4 rounded-r-sm bg-tools" style="left:19%;width:4%"></div></div><span class="text-right">2.9s +2.6s</span></div>
+        <div class="grid grid-cols-[140px_1fr_56px] items-center gap-2"><span class="truncate text-stone-500">claude-opus-5-5</span><div class="relative h-4"><div class="absolute h-4 rounded-sm bg-api" style="left:23%;width:18%"></div></div><span class="text-right">24.1s</span></div>
+        <div class="grid grid-cols-[140px_1fr_56px] items-center gap-2"><span class="truncate text-stone-500">Task · Explore</span><div class="relative h-4"><div class="absolute h-4 rounded-sm bg-stone-400 dark:bg-stone-600" style="left:41%;width:30%"></div></div><span class="text-right">40.2s</span></div>
+        <div class="grid grid-cols-[140px_1fr_56px] items-center gap-2"><span class="truncate text-stone-500">&nbsp;&nbsp;↳ Grep "RequestGate"</span><div class="relative h-4"><div class="absolute h-4 rounded-sm bg-tools" style="left:44%;width:2%"></div></div><span class="text-right">0.3s</span></div>
+        <div class="grid grid-cols-[140px_1fr_56px] items-center gap-2"><span class="truncate text-stone-500">&nbsp;&nbsp;↳ claude-haiku-4-5</span><div class="relative h-4"><div class="absolute h-4 rounded-sm bg-api/60" style="left:46%;width:22%"></div></div><span class="text-right">29.5s</span></div>
+        <div class="grid grid-cols-[140px_1fr_56px] items-center gap-2"><span class="truncate text-stone-500">Edit App.svelte</span><div class="relative h-4"><div class="absolute h-4 rounded-sm bg-tools" style="left:72%;width:1%"></div><div class="absolute h-4 rounded-r-sm bg-hooks" style="left:73%;width:3%"></div></div><span class="text-right">0.1s +3.4s</span></div>
+        <div class="grid grid-cols-[140px_1fr_56px] items-center gap-2"><span class="truncate text-crit">API error 529</span><div class="relative h-4"><div class="absolute h-4 rounded-sm border border-dashed border-crit" style="left:76%;width:1%"></div></div><span class="text-right text-crit">0.4s</span></div>
+        <div class="grid grid-cols-[140px_1fr_56px] items-center gap-2"><span class="truncate text-stone-500">claude-opus-5-5</span><div class="relative h-4"><div class="absolute h-4 rounded-sm bg-api" style="left:78%;width:20%"></div></div><span class="text-right">27.0s</span></div>
+      </div>
+      <div class="mt-3 flex justify-between border-t border-stone-200 pt-1.5 font-mono text-[10px] text-stone-400 dark:border-stone-800"><span>0s</span><span>30s</span><span>60s</span><span>90s</span><span>2m 14s</span></div>
+    </div>
+  </section>
+
+  <!-- Breakdown tables -->
+  <section class="grid gap-4 lg:grid-cols-3">
+    <div class="panel p-4">
+      <div class="mb-2 flex items-baseline"><h2 class="font-semibold">Hooks</h2><span class="ml-auto text-xs text-stone-500">by total time</span></div>
+      <table class="w-full text-xs"><tbody class="font-mono">
+        <tr class="border-b border-stone-100 dark:border-stone-800"><td class="py-1.5 truncate max-w-0 w-full">PreToolUse:Bash</td><td class="px-2 text-warn">2.8s</td><td class="text-right">2m 01s</td></tr>
+        <tr class="border-b border-stone-100 dark:border-stone-800"><td class="py-1.5 truncate max-w-0 w-full">UserPromptSubmit</td><td class="px-2">1.1s</td><td class="text-right">41s</td></tr>
+        <tr class="border-b border-stone-100 dark:border-stone-800"><td class="py-1.5 truncate max-w-0 w-full">PostToolUse:Edit</td><td class="px-2">0.9s</td><td class="text-right">22s</td></tr>
+        <tr><td class="py-1.5 truncate max-w-0 w-full">SessionStart</td><td class="px-2">1.4s</td><td class="text-right">8s</td></tr>
+      </tbody></table>
+      <p class="mt-1 text-[10px] text-stone-400">middle column: p95</p>
+    </div>
+    <div class="panel p-4">
+      <div class="mb-2 flex items-baseline"><h2 class="font-semibold">Tools and MCP</h2><span class="ml-auto text-xs text-stone-500">by total time</span></div>
+      <table class="w-full text-xs"><tbody class="font-mono">
+        <tr class="border-b border-stone-100 dark:border-stone-800"><td class="py-1.5 truncate max-w-0 w-full">Bash</td><td class="px-2">3.1s</td><td class="text-right">2m 48s</td></tr>
+        <tr class="border-b border-stone-100 dark:border-stone-800"><td class="py-1.5 truncate max-w-0 w-full">Task</td><td class="px-2">44s</td><td class="text-right">1m 20s</td></tr>
+        <tr class="border-b border-stone-100 dark:border-stone-800"><td class="py-1.5 truncate max-w-0 w-full">mcp__outline__list_documents</td><td class="px-2">2.2s</td><td class="text-right">19s</td></tr>
+        <tr><td class="py-1.5 truncate max-w-0 w-full">Read</td><td class="px-2">0.1s</td><td class="text-right">6s</td></tr>
+      </tbody></table>
+    </div>
+    <div class="panel p-4">
+      <div class="mb-2 flex items-baseline"><h2 class="font-semibold">Models</h2><span class="ml-auto text-xs text-stone-500">p50 / p95</span></div>
+      <table class="w-full text-xs"><tbody class="font-mono">
+        <tr class="border-b border-stone-100 dark:border-stone-800"><td class="py-1.5">claude-opus-5-5</td><td class="px-2">5.1s</td><td class="text-right">11.2s</td></tr>
+        <tr class="border-b border-stone-100 dark:border-stone-800"><td class="py-1.5">claude-sonnet-5</td><td class="px-2">3.0s</td><td class="text-right">6.4s</td></tr>
+        <tr><td class="py-1.5">claude-haiku-4-5</td><td class="px-2">0.9s</td><td class="text-right">2.0s</td></tr>
+      </tbody></table>
+    </div>
+  </section>
+  <p class="text-center text-xs text-stone-500">Skills, subagents, permissions, MCP connects and errors: below the fold, same table style.</p>
+</main>
+</body>
+</html>

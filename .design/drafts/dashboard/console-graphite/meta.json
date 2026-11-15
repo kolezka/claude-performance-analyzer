@@ -1,0 +1,22 @@
+{
+  "title": "Console: graphite",
+  "direction": "Same console layout and content. Neutral zinc greys with no blue tint, square corners, hairline borders, one accent per signal. Reads like a pro tool (Linear, Grafana dark).",
+  "status": "candidate",
+  "versions": {
+    "v1": {
+      "parent": {
+        "draft": "console",
+        "version": 1
+      }
+    }
+  },
+  "tokens": {
+    "bg-dark": "#111113",
+    "sidebar-dark": "#0a0a0b",
+    "api": "#6b9bff",
+    "tools": "#f0904f",
+    "hooks": "#3cc68a",
+    "warn": "#e8b04a",
+    "crit": "#ec5b5b"
+  }
+}

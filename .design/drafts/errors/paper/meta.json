@@ -1,0 +1,13 @@
+{
+  "title": "Errors: paper",
+  "direction": "API errors, tool failures, permission denials and compactions in one grouped list.",
+  "status": "selected",
+  "variant": "paper",
+  "versions": {
+    "v1": {}
+  },
+  "proposed": [
+    "Grouping of repeated errors",
+    "Open turn link needs turn id on each error row"
+  ]
+}
