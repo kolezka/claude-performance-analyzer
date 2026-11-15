@@ -5,11 +5,13 @@
   import { clockSec } from "./format";
   import { RequestGate, RunningHooks, apiUrl, liveForHost } from "./hosts";
 
-  let { hostId, onData }: { hostId: string; onData: () => void } = $props();
+  let { hostId, hostLabel = "", onData, onState }: { hostId: string; hostLabel?: string; onData: () => void; onState?: (state: string, ago: string) => void } = $props();
 
   const FEED_MAX = 40;
   const STALE_HOOK_MS = 120_000;
-  const KIND_COLOR: Record<string, string> = { api: "--api", tool: "--tools", hook: "--hooks", error: "--critical" };
+  const KIND_CLASS: Record<string, string> = { api: "k-api", tool: "k-tool", hook: "k-hook", error: "k-error" };
+  // Hooks slower than this are tinted, matching the 2s p95 flag on the KPI.
+  const SLOW_HOOK_MS = 2000;
 
   interface Row extends LiveEvent {
     _id: number;
@@ -29,7 +31,6 @@
   const gate = new RequestGate();
 
   let visibleRows = $derived(feed.filter((e) => e.kind !== "hook_start"));
-  let maxMs = $derived(Math.max(...visibleRows.map((e) => e.ms ?? 0), 1000));
 
   async function backlog() {
     await gate.run<LiveEvent[]>(fetch, apiUrl("/api/live", hostId), {
@@ -104,36 +105,35 @@
       agoText = lastSeen ? `last event ${fmtMs(Math.max(0, now - lastSeen))} ago` : "";
       runningList = running.entries(now);
       nowTick = now;
+      onState?.(connState, agoText);
     }, 250);
     return () => clearInterval(id);
   });
 </script>
 
-<section id="live" class="card" aria-live="polite">
+<section id="live" aria-live="polite">
   <div class="live-head">
-    <span class="dot" class:on={connState === "Live"}></span><strong>{connState}</strong>
-    <span class="muted">{agoText}</span>
-    <span>
-      {#each runningList as [k, t] (k)}
-        <span class="running">hook {k.split("|")[1]} running {fmtMs(nowTick - t)}</span>
-      {/each}
-    </span>
+    <h2>Live</h2>
+    <span class="live-dot" class:on={connState === "Live"} title={connState}></span>
+    <span class="push small muted">{hostLabel}</span>
   </div>
-  <div class="feed">
-    {#if !visibleRows.length}
-      <p class="empty">Waiting for events...</p>
-    {:else}
+  <div class="small muted" style="margin-top:2px">{connState}{agoText ? ` · ${agoText}` : ""}</div>
+  {#each runningList as [k, t] (k)}
+    <div class="running-banner"><span class="mono">{k.split("|")[1]}</span> running <strong class="mono">{fmtMs(nowTick - t)}</strong></div>
+  {/each}
+  {#if !visibleRows.length}
+    <p class="empty" style="margin-top:12px">Waiting for events...</p>
+  {:else}
+    <ol class="feed">
       {#each visibleRows as e (e._id)}
-        <div class="row" class:fresh={e.fresh} class:bad={!e.ok}>
+        <li class:fresh={e.fresh} class:bad={!e.ok}>
           <span class="t">{clockSec(e.tsMs)}</span>
-          <span class="chip" style="background:var({KIND_COLOR[e.kind] ?? '--muted'})"></span>
-          <span class="lbl" title={e.label}>{e.label}{e.ok || e.label.endsWith("failed") ? "" : " (failed)"}</span>
-          <span class="track">
-            {#if e.ms}<span class="bar" style="width:{Math.max(2, (e.ms / maxMs) * 100)}%;background:var({KIND_COLOR[e.kind] ?? '--muted'})"></span>{/if}
-          </span>
-          <span class="ms">{e.ms ? fmtMs(e.ms) : ""}</span>
-        </div>
+          <span class="lbl truncate" title={e.label}
+            ><span class={KIND_CLASS[e.kind] ?? "k-other"}>{e.kind === "error" ? "err" : e.kind}</span> {e.label}{e.ok || e.label.endsWith("failed") ? "" : " (failed)"}</span
+          >
+          <span class="ms" class:slow={e.kind === "hook" && (e.ms ?? 0) > SLOW_HOOK_MS}>{e.ms ? fmtMs(e.ms) : ""}</span>
+        </li>
       {/each}
-    {/if}
-  </div>
+    </ol>
+  {/if}
 </section>

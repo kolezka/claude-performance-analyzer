@@ -4,6 +4,7 @@
 import { describe, expect, test } from "bun:test";
 import * as helpers from "../src/hosts";
 import { LOCAL_HOST, type Host } from "../src/hosts";
+import { parseRoute } from "../src/route";
 
 const transpiler = new Bun.Transpiler({ loader: "ts" });
 const appSource = await Bun.file(`${import.meta.dir}/../src/App.svelte`).text();
@@ -83,7 +84,7 @@ function app(opts: { hostId: string; hosts: Host[]; search?: string; hash?: stri
       },
     },
   };
-  const fns = ["selectHost", "refreshHosts", "load", "loadTurn"].map((n) => extractFunction(appSource, n)).join("\n");
+  const fns = ["selectHost", "refreshHosts", "load"].map((n) => extractFunction(appSource, n)).join("\n");
   const code = transpiler.transformSync(`${fns}\n${extractOnPop(appSource)}`);
   const make = new Function(
     "helpers",
@@ -92,19 +93,21 @@ function app(opts: { hostId: string; hosts: Host[]; search?: string; hash?: stri
     const { RequestGate, LOCAL_HOST_ID, LOCAL_HOST, apiUrl, hostFromSearch, reconcileSelection, searchWithHost } = helpers;
     const { fetch, location, window } = env;
     const clock = (t) => "t" + t;
+    const parseRoute = env.parseRoute;
+    let route = parseRoute(location.hash);
     const minutes = 60;
     let hostId = env.hostId, hosts = env.hosts, hostsLoaded = true, hostsError = null;
-    let summary = null, turn = null, selectedPromptId = null, loadError = null, loadErrorStatus = null, updatedText = "";
+    let summary = null, loadError = null, loadErrorStatus = null, updatedText = "";
     const gate = new RequestGate();
     const hostsGate = new RequestGate();
     ${code}
     return {
-      selectHost, refreshHosts, load, loadTurn, onPop,
-      state: () => ({ hostId, hosts, summary, turn, loadError, updatedText }),
+      selectHost, refreshHosts, load, onPop,
+      state: () => ({ hostId, hosts, summary, loadError, updatedText }),
     };
     `,
   );
-  const api = make(helpers, { fetch: net.fetch, location, window, hostId: opts.hostId, hosts: opts.hosts });
+  const api = make(helpers, { fetch: net.fetch, location, window, hostId: opts.hostId, hosts: opts.hosts, parseRoute });
   return { ...api, net, location, historyEdits };
 }
 
@@ -181,20 +184,8 @@ describe("App summary vs host list (host deleted elsewhere)", () => {
   });
 });
 
-describe("App turn and A-B-A", () => {
-  eachGap("an old host's turn does not land after a switch", async (gap) => {
-    const a = app({ hostId: remoteA.id, hosts: [LOCAL_HOST, remoteA, remoteB] });
-    a.loadTurn();
-    await flush();
-    const turnCall = a.net.find((u: string) => u.startsWith("/api/turn") && u.endsWith(`host=${remoteA.id}`))[0]!;
-    await interleave(
-      () => turnCall.body({ promptId: "p-A", marker: "REMOTE_A" }),
-      () => a.selectHost(remoteB.id),
-      gap,
-    );
-    expect(a.state().turn).toBeNull();
-  });
-
+// Turn detail moved to the Turns page; its host-switch race is covered in loader.test.ts.
+describe("App A-B-A", () => {
   eachGap("A to B to A: the first A request stays stale even though the host id matches again", async (gap) => {
     const a = app({ hostId: remoteA.id, hosts: [LOCAL_HOST, remoteA, remoteB] });
     a.load();
