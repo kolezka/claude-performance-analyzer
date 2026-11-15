@@ -1,0 +1,15 @@
+{
+  "name": "@cpa/dsh-telemetry",
+  "type": "module",
+  "private": true,
+  "exports": {
+    ".": "./src/index.js"
+  },
+  "scripts": {
+    "replay": "bun scripts/replay.ts"
+  },
+  "devDependencies": {
+    "@cpa/analytics": "workspace:*",
+    "@cpa/otlp": "workspace:*"
+  }
+}

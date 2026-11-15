@@ -30,6 +30,13 @@
         "svelte": "^5.57.1",
       },
     },
+    "apps/dsh-telemetry": {
+      "name": "@cpa/dsh-telemetry",
+      "devDependencies": {
+        "@cpa/analytics": "workspace:*",
+        "@cpa/otlp": "workspace:*",
+      },
+    },
     "apps/mcp": {
       "name": "@cpa/mcp",
       "dependencies": {
@@ -69,6 +76,8 @@
     "@cpa/collector": ["@cpa/collector@workspace:apps/collector"],
 
     "@cpa/dashboard": ["@cpa/dashboard@workspace:apps/dashboard"],
+
+    "@cpa/dsh-telemetry": ["@cpa/dsh-telemetry@workspace:apps/dsh-telemetry"],
 
     "@cpa/mcp": ["@cpa/mcp@workspace:apps/mcp"],
 
