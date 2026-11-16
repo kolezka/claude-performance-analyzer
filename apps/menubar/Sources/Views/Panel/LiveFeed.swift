@@ -11,28 +11,39 @@ struct LiveFeed: View {
 
     var body: some View {
         if !events.isEmpty || !running.isEmpty {
-            VStack(alignment: .leading, spacing: 4) {
-                SectionTitle("Live")
-                ForEach(running) { hook in runningRow(hook) }
-                let ids = rowIds(events.map(\.liveKey))
-                ForEach(Array(zip(ids, events).prefix(Prefs.clamp(liveFeedLength, 5...15))), id: \.0) { _, e in
-                    row(e)
+            Card(padding: 6) {
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(running) { hook in runningRow(hook) }
+                    let ids = rowIds(events.map(\.liveKey))
+                    ForEach(Array(zip(ids, events).prefix(Prefs.clamp(liveFeedLength, 5...15))), id: \.0) { _, e in
+                        row(e)
+                    }
                 }
+                .clipped()
             }
-            .clipped()
+        } else {
+            Card {
+                Label("Waiting for events…", systemImage: "dot.radiowaves.left.and.right")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 12)
+            }
         }
     }
 
     // The counter is information, not decoration, so it updates even with animations off.
     private func runningRow(_ hook: RunningHook) -> some View {
-        HStack(spacing: 6) {
-            ProgressView().controlSize(.mini).frame(width: 16)
-            Image(systemName: Self.symbol("hook")).foregroundStyle(.secondary).frame(width: 16)
+        HStack(spacing: 8) {
+            ProgressView().controlSize(.mini).frame(width: 52, alignment: .leading)
+            KindIcon(symbol: Self.symbol("hook"), tint: Kind.tint("hook"), size: 20)
             Text(hook.label).lineLimit(1).truncationMode(.middle)
-            Text("running").foregroundStyle(.tertiary)
+            Tag("Running", tint: .orange)
             Spacer(minLength: 8)
             Text(fmtMs(max(0, now.timeIntervalSince1970 * 1000 - hook.startedMs))).foregroundStyle(.secondary)
         }
+        .padding(.vertical, 4)
+        .padding(.horizontal, 4)
         .font(.callout)
         .monospacedDigit()
         .help("\(hook.label) started and has not finished yet")
@@ -40,21 +51,23 @@ struct LiveFeed: View {
 
     @ViewBuilder
     private func row(_ e: LiveEvent) -> some View {
-        let label = HStack(spacing: 6) {
+        let label = HStack(spacing: 8) {
             Text(date(e.tsMs), format: .dateTime.hour().minute().second())
+                .font(.caption)
                 .foregroundStyle(.tertiary)
-            Image(systemName: Self.symbol(e.kind))
-                .foregroundStyle(e.ok ? Color.secondary : Color.red)
-                .frame(width: 16)
+                .frame(width: 52, alignment: .leading)
+            KindIcon(symbol: e.ok ? Self.symbol(e.kind) : "xmark", tint: e.ok ? Kind.tint(e.kind) : .red, size: 20)
             Text(e.label).lineLimit(1).truncationMode(.middle)
             Spacer(minLength: 8)
             if let ms = e.ms {
                 Text(fmtMs(ms)).foregroundStyle(.secondary)
             }
             if e.id != nil {
-                Image(systemName: "chevron.right").font(.caption2).foregroundStyle(.tertiary)
+                Image(systemName: "chevron.right").font(.caption2.weight(.semibold)).foregroundStyle(.tertiary)
             }
         }
+        .padding(.vertical, 3)
+        .padding(.horizontal, 4)
         .font(.callout)
         .monospacedDigit()
 

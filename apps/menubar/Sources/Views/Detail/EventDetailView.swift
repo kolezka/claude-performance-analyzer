@@ -9,11 +9,11 @@ struct EventDetailView: View {
     @State private var isLoading = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 18) {
             if let detail {
                 header(detail)
-                repositorySection(detail.session)
                 if !detail.details.isEmpty { detailsSection(detail.details) }
+                repositorySection(detail.session)
                 if let session = detail.session { sessionSection(session) }
             } else if let loadError {
                 EmptyState(
@@ -25,72 +25,45 @@ struct EventDetailView: View {
             } else {
                 DetailSkeleton()
             }
-            refreshBar
         }
+        .toolbar { RefreshToolbar(isLoading: isLoading) { Task { await load() } } }
         .task(id: "\(model.selectionGeneration)/\(id)") { await load() }
     }
 
-    private var refreshBar: some View {
-        HStack {
-            Spacer()
-            if isLoading { ProgressView().controlSize(.small) }
-            Button("Refresh", systemImage: "arrow.clockwise") { Task { await load() } }
-                .controlSize(.small)
-                .disabled(isLoading)
-        }
-    }
-
     private func header(_ d: EventDetail) -> some View {
-        HStack(alignment: .top, spacing: 8) {
-            Image(systemName: LiveFeed.symbol(d.kind))
-                .foregroundStyle(d.ok ? Color.secondary : Color.red)
-                .frame(width: 18)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(d.label).font(.headline)
-                HStack(spacing: 4) {
-                    Text(date(d.tsMs), format: .dateTime.month().day().hour().minute().second())
-                    if let ms = d.ms { Text("· \(fmtMs(ms))") }
-                }
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .monospacedDigit()
-            }
-            Spacer()
+        DetailHeader(
+            symbol: d.ok ? LiveFeed.symbol(d.kind) : "xmark.octagon",
+            tint: d.ok ? Kind.tint(d.kind) : .red,
+            title: d.label,
+            subtitle: subtitle(d)
+        ) {
             OkBadge(ok: d.ok)
         }
     }
 
+    private func subtitle(_ d: EventDetail) -> String {
+        let time = date(d.tsMs).formatted(.dateTime.month().day().hour().minute().second())
+        return [time, d.ms.map(fmtMs)].compactMap { $0 }.joined(separator: " · ")
+    }
+
     private func repositorySection(_ session: SessionInfo?) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            SectionTitle("Repository")
+        DetailSection("Repository", symbol: "folder") {
             if let repo = session?.repo {
-                VStack(alignment: .leading, spacing: 3) {
-                    HStack(spacing: 6) {
-                        Image(systemName: "folder").foregroundStyle(.secondary)
-                        Text(repo.name).font(.callout.weight(.medium))
-                    }
-                    let path = repo.worktree ?? repo.root
-                    Text(displayPath(path, hostId: model.selectedHostId))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .textSelection(.enabled)
-                        .lineLimit(2)
-                        .help(path)
-                    if let branch = session?.branch {
-                        Label(branch, systemImage: "arrow.triangle.branch")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                    if let session {
+                let path = repo.worktree ?? repo.root
+                Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 6) {
+                    InfoRow("Name", repo.name)
+                    InfoRow("Path", displayPath(path, hostId: model.selectedHostId), mono: true)
+                    if let branch = session?.branch { InfoRow("Branch", branch, mono: true) }
+                }
+                if let session {
+                    VStack(alignment: .leading, spacing: 2) {
                         Text("Inferred from \(session.pathsSeen) path\(session.pathsSeen == 1 ? "" : "s").")
-                            .font(.caption2)
-                            .foregroundStyle(.tertiary)
                         if !session.otherRepos.isEmpty {
                             Text("Also seen: \(session.otherRepos.joined(separator: ", "))")
-                                .font(.caption2)
-                                .foregroundStyle(.tertiary)
                         }
                     }
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
                 }
             } else {
                 Text("Unknown repository").font(.callout.weight(.medium))
@@ -102,56 +75,43 @@ struct EventDetailView: View {
     }
 
     private func detailsSection(_ details: [EventDetail.Detail]) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            SectionTitle("Details")
-            ForEach(details, id: \.key) { d in
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(d.key).font(.caption).foregroundStyle(.secondary)
-                    Text(d.value)
-                        .font(.callout)
-                        .textSelection(.enabled)
-                        .lineLimit(4)
-                        .help(d.value)
+        DetailSection("Details", symbol: "info.circle") {
+            Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 6) {
+                ForEach(details, id: \.key) { d in
+                    InfoRow(title: d.key) {
+                        Text(d.value)
+                            .textSelection(.enabled)
+                            .lineLimit(4)
+                            .help(d.value)
+                    }
                 }
             }
         }
     }
 
     private func sessionSection(_ session: SessionInfo) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            SectionTitle("Session")
-            HStack(spacing: 6) {
-                Text(String(session.sessionId.prefix(8)))
-                    .font(.callout)
-                    .monospaced()
-                    .help(session.sessionId)
-                Button { copyToPasteboard(session.sessionId) } label: {
-                    Image(systemName: "doc.on.doc")
+        DetailSection("Session", symbol: "terminal") {
+            Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 6) {
+                InfoRow(title: "ID") {
+                    HStack(spacing: 6) {
+                        Text(String(session.sessionId.prefix(8)))
+                            .monospaced()
+                            .help(session.sessionId)
+                        CopyButton(value: session.sessionId, help: "Copy session id")
+                    }
                 }
-                .buttonStyle(.plain)
-                .foregroundStyle(.secondary)
-                .help("Copy session id")
+                if let kindLabel = session.kindLabel { InfoRow("Kind", kindLabel) }
+                if let terminal = session.terminal { InfoRow("Terminal", terminal) }
+                if let version = session.claudeVersion { InfoRow("Claude Code", version) }
+                if !session.models.isEmpty { InfoRow("Models", session.models.joined(separator: ", ")) }
+                InfoRow(title: "Usage") {
+                    Text("\(session.prompts) prompts · \(session.costUsd, format: .currency(code: "USD"))").monospacedDigit()
+                }
+                InfoRow(title: "Active") {
+                    Text("\(date(session.firstMs), format: .dateTime.hour().minute()) to \(date(session.lastMs), format: .dateTime.hour().minute())")
+                        .monospacedDigit()
+                }
             }
-            if let kindLabel = session.kindLabel {
-                Text(kindLabel).font(.caption).foregroundStyle(.secondary)
-            }
-            if let terminal = session.terminal {
-                Label(terminal, systemImage: "terminal").font(.caption).foregroundStyle(.secondary)
-            }
-            if let version = session.claudeVersion {
-                Text("Claude Code \(version)").font(.caption).foregroundStyle(.secondary)
-            }
-            if !session.models.isEmpty {
-                Text(session.models.joined(separator: ", ")).font(.caption).foregroundStyle(.secondary)
-            }
-            Text("\(session.prompts) prompts · \(session.costUsd, format: .currency(code: "USD"))")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .monospacedDigit()
-            Text("\(date(session.firstMs), format: .dateTime.hour().minute()) to \(date(session.lastMs), format: .dateTime.hour().minute())")
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
-                .monospacedDigit()
         }
     }
 
