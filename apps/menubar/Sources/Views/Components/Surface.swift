@@ -167,8 +167,10 @@ struct InfoRow<Value: View>: View {
 
     var body: some View {
         GridRow(alignment: .firstTextBaseline) {
+            // Fixed minimum width keeps values lined up across separate cards.
             Text(title)
                 .foregroundStyle(.secondary)
+                .frame(minWidth: 96, alignment: .trailing)
                 .gridColumnAlignment(.trailing)
             value
                 .frame(maxWidth: .infinity, alignment: .leading)

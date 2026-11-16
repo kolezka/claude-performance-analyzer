@@ -105,7 +105,7 @@ struct EventDetailView: View {
                 if let version = session.claudeVersion { InfoRow("Claude Code", version) }
                 if !session.models.isEmpty { InfoRow("Models", session.models.joined(separator: ", ")) }
                 InfoRow(title: "Usage") {
-                    Text("\(session.prompts) prompts · \(session.costUsd, format: .currency(code: "USD"))").monospacedDigit()
+                    Text("\(session.prompts) \(session.prompts == 1 ? "prompt" : "prompts") · \(session.costUsd, format: .currency(code: "USD"))").monospacedDigit()
                 }
                 InfoRow(title: "Active") {
                     Text("\(date(session.firstMs), format: .dateTime.hour().minute()) to \(date(session.lastMs), format: .dateTime.hour().minute())")
