@@ -114,11 +114,12 @@ struct PanelView: View {
             .keyboardShortcut("d")
             .help("Open the dashboard in your browser (⌘D)")
             Spacer()
-            Button("Settings", systemImage: "gearshape", action: openSettingsWindow)
+            Button("Settings…", systemImage: "gearshape", action: openSettingsWindow)
                 .keyboardShortcut(",")
                 .help("Open Settings (⌘,)")
             Button("Quit") { NSApp.terminate(nil) }
                 .keyboardShortcut("q")
+                .help("Quit \(appDisplayName) (⌘Q)")
         }
         .buttonStyle(.borderless)
     }

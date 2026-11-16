@@ -1168,6 +1168,32 @@ struct TelemetryHostsTests {
             h.check(offline.showIcon && offline.text == nil, "offline hidden keeps icon")
         }
 
+        // HIG App menu order: About alone first, Settings… with an ellipsis, Quit with the app name.
+        // Items stay in place and dim when unavailable instead of disappearing.
+        await h.run("status item menu follows the HIG App menu layout") {
+            let (titles, keys, dimmed, enabled) = await MainActor.run {
+                let menu = StatusItemMenu.shared
+                let saved = menu.dashboardURL
+                defer { menu.dashboardURL = saved }
+                menu.dashboardURL = nil
+                let off = menu.makeMenu()
+                menu.dashboardURL = URL(string: "http://127.0.0.1:4318/")
+                let on = menu.makeMenu()
+                return (
+                    off.items.map { $0.isSeparatorItem ? "-" : $0.title },
+                    off.items.map(\.keyEquivalent),
+                    off.items.first { $0.title == "Open Dashboard" }?.isEnabled,
+                    on.items.first { $0.title == "Open Dashboard" }?.isEnabled
+                )
+            }
+            let expected = ["About \(appDisplayName)", "-", "Open Dashboard", "Settings…", "-", "Quit \(appDisplayName)"]
+            h.check(titles == expected, "titles \(titles)")
+            h.check(keys == ["", "", "d", ",", "", "q"], "keys \(keys)")
+            h.check(dimmed == false, "dashboard item dims without a URL")
+            h.check(enabled == true, "dashboard item enables with a URL")
+            h.check(appDisplayName.count <= 16, "app name short enough for menu items")
+        }
+
         await h.run("remote hook definitions decode event and source without command") {
             let json = #"{"source":"plugin","plugin":"p","matcher":"Bash","type":"telemetry","command":null,"summary":"Registered on remote host","sessions":2,"configPath":null,"hookEvent":"PreToolUse","hookSource":"pluginHook"}"#
             let def = try JSONDecoder().decode(ItemDetail.Definition.self, from: Data(json.utf8))

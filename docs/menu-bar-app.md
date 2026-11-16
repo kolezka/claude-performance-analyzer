@@ -20,6 +20,8 @@ Click the label to open the **panel**:
 
 Click any row to open its detail card: count, failures, p50, p95 and max, a split by repository, and recent calls.
 
+Right-click the label for the app menu: About Claude Telemetry, Open Dashboard (⌘D), Settings… (⌘,) and Quit Claude Telemetry (⌘Q).
+
 The panel updates live from the collector while it is open and refreshes every 30 s for values that change with time.
 
 **Settings** let you launch at login, pick the default window and the windows in the header, point at another collector URL, set the request timeout and retry delay, change the label style, set the panel width and hide any section. The **Hosts** tab adds, regenerates and removes [remote hosts](remote-hosts.md).
