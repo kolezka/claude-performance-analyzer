@@ -152,6 +152,9 @@ struct ItemDetailView: View {
 
     private func patternsSection(_ patterns: [ItemDetail.Pattern]) -> some View {
         DetailSection("Patterns", symbol: "line.3.horizontal.decrease.circle") {
+            Text("Calls grouped by how many of their scripts succeeded.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
             ForEach(patterns, id: \.key) { pattern in
                 let selected = selectedPattern == pattern.key
                 Button {
@@ -163,7 +166,7 @@ struct ItemDetailView: View {
                             .font(.caption)
                         Text(pattern.label).foregroundStyle(pattern.errors > 0 ? Color.orange : Color.primary)
                         Spacer(minLength: 8)
-                        Text("\(pattern.count) · p95 \(fmtMs(pattern.p95))").foregroundStyle(.secondary)
+                        Text("\(pattern.count) \(pattern.count == 1 ? "call" : "calls") · p95 \(fmtMs(pattern.p95))").foregroundStyle(.secondary)
                     }
                     .font(.callout)
                     .monospacedDigit()
@@ -212,8 +215,10 @@ struct ItemDetailView: View {
                 HStack(spacing: 6) {
                     Text(date(call.tsMs), format: .dateTime.hour().minute().second())
                         .foregroundStyle(.tertiary)
+                    // Fixed width so the pattern column lines up across rows.
                     Text(call.ms.map(fmtMs) ?? "Not captured")
                         .foregroundStyle(call.ms == nil ? .tertiary : .primary)
+                        .frame(minWidth: 56, alignment: .trailing)
                     if let pattern = call.pattern {
                         Text(pattern).foregroundStyle(call.ok ? Color.secondary : Color.red).lineLimit(1)
                     }
