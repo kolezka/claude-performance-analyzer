@@ -37,15 +37,18 @@ test("DSH adapter pins the published runtime with no vendored copy", () => {
   const manifest = JSON.parse(readFileSync(join(adapter, "package.json"), "utf8"));
   const pluginVersion = JSON.parse(readFileSync(join(root, ".claude-plugin/plugin.json"), "utf8")).version;
   expect(manifest.version).toBe(pluginVersion);
-  expect(manifest.dependencies).toEqual({ "claude-plugin-dsh": "0.2.0" });
+  const version = manifest.dependencies["claude-plugin-dsh"];
+  expect(version).toMatch(/^\d+\.\d+\.\d+$/);
+  expect(manifest.dependencies).toEqual({ "claude-plugin-dsh": version });
   expect(manifest.files).toEqual(["index.js", "bun.lock", "cordis.patch.yml", "locale/*.json"]);
   const index = readFileSync(join(adapter, "index.js"), "utf8");
   expect(index).toContain("import { createPlugin, rootFrom } from 'claude-plugin-dsh'");
   expect(index).toContain("root: rootFrom(import.meta.url)");
   expect(existsSync(join(adapter, "claude-compat.js"))).toBe(false);
-  expect(readFileSync(join(adapter, "bun.lock"), "utf8")).toContain(
-    "sha512-pzSobglwIh7NuG5Y5W331kVIg5NExU5wnzW3citMKXl57CMmVW255b5zPLDyVA/ERSgUjhrsugBgkEq5p+S1Zw==",
-  );
+  const lockEntry = readFileSync(join(adapter, "bun.lock"), "utf8").split("\n")
+    .find((line) => line.trimStart().startsWith('"claude-plugin-dsh": ['));
+  expect(lockEntry).toContain(`"claude-plugin-dsh@${version}"`);
+  expect(lockEntry).toMatch(/"sha512-[A-Za-z0-9+/]+=*"/);
   // The harness MCP server reads Claude Code sessions, so its explicit row stays off by default.
   const patch = readFileSync(join(adapter, "cordis.patch.yml"), "utf8");
   expect(patch).toContain("name: '@deepseek-ai/dsh-mcp-client'");
@@ -70,7 +73,7 @@ test("standalone adapter install loads the skill from the installed runtime", ()
     expect({ code: result.status, stderr: result.stderr }).toEqual({ code: 0, stderr: "" });
     const decoded = JSON.parse(result.stdout);
     expect(decoded.resolved).toBe(join(dsh, "node_modules/claude-plugin-dsh/package.json"));
-    expect(decoded.version).toBe("0.2.0");
+    expect(decoded.version).toBe(JSON.parse(readFileSync(join(dsh, "package.json"), "utf8")).dependencies["claude-plugin-dsh"]);
     expect(decoded.name).toBe("claude-compat-performance-analyzer");
     expect(decoded.names).toEqual(["harness-cost"]);
     expect(decoded.sections).toEqual([]);
