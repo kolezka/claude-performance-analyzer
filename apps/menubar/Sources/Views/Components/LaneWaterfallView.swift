@@ -86,7 +86,7 @@ struct LaneWaterfallView: View {
         GeometryReader { outer in
             // Wider than the flat view's fixed 110pt: real labels like "mcp: outline/update_document"
             // need the room, but a narrow panel shouldn't lose its whole track to the label.
-            let labelWidth = min(max(outer.size.width * 0.32, 170), 260)
+            let labelWidth = min(max(outer.size.width * 0.4, 200), 300)
             // Idle gaps are compressed to a fixed width each; everything else maps linearly
             // over whatever is left. Gap width shrinks (floor ~4pt) when the track is too
             // narrow to fit every gap at full size, instead of letting bars overflow it.

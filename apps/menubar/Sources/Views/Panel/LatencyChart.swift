@@ -102,6 +102,16 @@ struct LatencyChart: View {
             }
         }
         .frame(height: 110)
+        // HIG charts: describe what the chart shows, with real values, not what it looks like.
+        .accessibilityLabel("API latency, p50 and p95, over the selected window")
+        .accessibilityValue(accessibilitySummary)
+    }
+
+    private var accessibilitySummary: String {
+        let busy = points.filter { $0.count > 0 }
+        guard let worst = busy.compactMap(\.p95).max() else { return "No requests" }
+        let latest = busy.last?.p50.map { "latest p50 \(fmtMs($0))" } ?? ""
+        return "\(busy.reduce(0) { $0 + $1.count }) requests, highest p95 \(fmtMs(worst)), \(latest)"
     }
 }
 

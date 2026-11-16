@@ -9,14 +9,26 @@ struct AdvancedSettingsTab: View {
 
     var body: some View {
         Form {
-            Section("Reset") {
-                Button("Reset All Settings…", role: .destructive) { showResetConfirm = true }
-                if let resetError {
-                    Text(resetError).font(.caption).foregroundStyle(.red)
+            Section {
+                LabeledContent("Preferences file") {
+                    Button("Show in Finder") { revealPreferencesFile() }
                 }
+            } header: {
+                Text("Files")
             }
-            Section("Files") {
-                Button("Reveal Preferences File") { revealPreferencesFile() }
+            Section {
+                LabeledContent("Restore defaults") {
+                    Button("Reset All Settings…", role: .destructive) { showResetConfirm = true }
+                }
+                if let resetError {
+                    ErrorText(resetError)
+                }
+            } header: {
+                Text("Reset")
+            } footer: {
+                Text("Turns launch at login off and starts the bundled collector again.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
             }
         }
         .formStyle(.grouped)

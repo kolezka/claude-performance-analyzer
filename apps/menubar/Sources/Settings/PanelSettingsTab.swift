@@ -24,29 +24,38 @@ struct PanelSettingsTab: View {
                     Text("480").tag(480)
                 }
             }
-            Section("Sections") {
+            Section {
                 Toggle("KPIs", isOn: $showKpis)
                 Toggle("Latency chart", isOn: $showLatencyChart)
-                Toggle("Breakdown", isOn: $showBreakdown)
+                Toggle("Where turn time goes", isOn: $showBreakdown)
                 Toggle("Slowest", isOn: $showSlowest)
                 Toggle("By total time", isOn: $showTotalTime)
                 Toggle("Live feed", isOn: $showLiveFeed)
-                Toggle("Turn waterfall", isOn: $showWaterfall)
+                Toggle("Turn timeline", isOn: $showWaterfall)
+            } header: {
+                Text("Sections")
+            } footer: {
+                Text("Overview shows KPIs, the chart and the time split. Top shows the two lists. A tab with no sections left is hidden.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
             }
             Section("Lists") {
                 Stepper(value: $rowsPerList, in: 3...8) {
-                    Text("Rows per list: \(rowsPerList)")
+                    LabeledContent("Rows per list", value: "\(rowsPerList)")
                 }
                 Stepper(value: $liveFeedLength, in: 5...15) {
-                    Text("Live feed length: \(liveFeedLength)")
+                    LabeledContent("Live feed length", value: "\(liveFeedLength)")
                 }
                 Toggle("Hide hook-start events", isOn: $hideHookStartEvents)
             }
-            Section("Highlighting") {
+            Section {
                 Stepper(value: $hookWarnThresholdMs, in: 500...10000, step: 100) {
-                    Text("Hook warn threshold: \(Int(Prefs.clamp(hookWarnThresholdMs, 500...10000)))ms")
+                    LabeledContent("Hook warning threshold", value: "\(Int(Prefs.clamp(hookWarnThresholdMs, 500...10000))) ms")
                 }
-                Text("Only affects this panel's Slowest highlight. The collector's own slow state always uses a fixed rule.")
+            } header: {
+                Text("Highlighting")
+            } footer: {
+                Text("Only affects the Slowest highlight in the panel. The collector's own slow state always uses a fixed rule.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }
