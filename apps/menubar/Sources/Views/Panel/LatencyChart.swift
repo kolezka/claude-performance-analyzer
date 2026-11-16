@@ -35,10 +35,8 @@ struct LatencyChart: View {
     @State private var hoverTime: Date?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack {
-                SectionTitle("API latency")
-                Spacer()
+        VStack(alignment: .leading, spacing: 8) {
+            SectionHeader(title: "API latency") {
                 Swatch(color: .blue, text: "p50")
                 Swatch(color: .blue.opacity(0.35), text: "p95")
             }
@@ -48,7 +46,7 @@ struct LatencyChart: View {
                 Text("No API requests in this window.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, minHeight: 90)
+                    .frame(maxWidth: .infinity, minHeight: 110)
             }
         }
     }
@@ -62,6 +60,11 @@ struct LatencyChart: View {
 
     private var chart: some View {
         Chart {
+            ForEach(LatencySample.from(points).filter { $0.series == "p50" }) { s in
+                AreaMark(x: .value("Time", s.time), y: .value("Latency", s.ms), series: .value("Segment", s.segment))
+                    .foregroundStyle(LinearGradient(colors: [Color.blue.opacity(0.22), Color.blue.opacity(0.02)], startPoint: .top, endPoint: .bottom))
+                    .interpolationMethod(.monotone)
+            }
             ForEach(LatencySample.from(points)) { s in
                 LineMark(x: .value("Time", s.time), y: .value("Latency", s.ms), series: .value("Segment", s.segment))
                     .foregroundStyle(by: .value("Series", s.series))
@@ -89,7 +92,7 @@ struct LatencyChart: View {
         .chartLegend(.hidden)
         .chartYAxis {
             AxisMarks(values: .automatic(desiredCount: 3)) { v in
-                AxisGridLine()
+                AxisGridLine(stroke: StrokeStyle(lineWidth: 0.5, dash: [2, 3]))
                 AxisValueLabel { if let ms = v.as(Double.self) { Text(fmtMs(ms)) } }
             }
         }
@@ -98,7 +101,17 @@ struct LatencyChart: View {
                 AxisValueLabel(format: .dateTime.hour().minute(), collisionResolution: .greedy(minimumSpacing: 6))
             }
         }
-        .frame(height: 90)
+        .frame(height: 110)
+        // HIG charts: describe what the chart shows, with real values, not what it looks like.
+        .accessibilityLabel("API latency, p50 and p95, over the selected window")
+        .accessibilityValue(accessibilitySummary)
+    }
+
+    private var accessibilitySummary: String {
+        let busy = points.filter { $0.count > 0 }
+        guard let worst = busy.compactMap(\.p95).max() else { return "No requests" }
+        let latest = busy.last?.p50.map { "latest p50 \(fmtMs($0))" } ?? ""
+        return "\(busy.reduce(0) { $0 + $1.count }) requests, highest p95 \(fmtMs(worst)), \(latest)"
     }
 }
 

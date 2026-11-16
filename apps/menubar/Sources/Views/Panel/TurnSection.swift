@@ -10,26 +10,35 @@ struct TurnSection: View {
     private let maxRows = 8
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 5) {
-            HStack {
-                SectionTitle("Turn")
-                Spacer()
+        VStack(alignment: .leading, spacing: 6) {
+            SectionHeader(title: "Turn") {
                 Picker("Sort", selection: $model.turnsSort) {
                     Text("Latest").tag(Telemetry.TurnsSort.recent)
                     Text("Slowest").tag(Telemetry.TurnsSort.slowest)
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
-                .controlSize(.mini)
+                .controlSize(.small)
                 .fixedSize()
             }
-            if model.turns.isEmpty {
-                Text(model.turnsError ?? "No turns in this window.")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-            } else {
-                stepper
-                waterfall
+            .padding(.horizontal, 2)
+            Card {
+                VStack(alignment: .leading, spacing: 10) {
+                    if model.turns.isEmpty {
+                        Text(model.turnsError ?? "No turns in this window.")
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        stepper
+                        Divider()
+                        waterfall
+                        if let promptId = displayedPromptId {
+                            Button("Open in Details", systemImage: "arrow.up.forward.app") { onOpenTurn(promptId) }
+                                .controlSize(.small)
+                                .frame(maxWidth: .infinity, alignment: .trailing)
+                        }
+                    }
+                }
             }
         }
     }
@@ -79,8 +88,8 @@ struct TurnSection: View {
 
     private var stepper: some View {
         HStack(spacing: 6) {
-            Button { step(1) } label: { Image(systemName: "chevron.left") }
-                .buttonStyle(.plain)
+            Button { step(1) } label: { Image(systemName: "chevron.left").frame(width: 20, height: 20) }
+                .buttonStyle(.borderless)
                 .disabled(!canStepOlder)
                 .help("Older turn")
 
@@ -89,12 +98,12 @@ struct TurnSection: View {
                     HStack(spacing: 4) {
                         subtitle(folder: current.folder, sessionLabel: current.sessionLabel, repo: current.repo)
                         if current.inProgress {
-                            Text("In progress").foregroundStyle(.orange)
+                            Tag("In progress", tint: .orange)
                         } else if isPinned {
-                            Text("Pinned").foregroundStyle(.secondary)
+                            Tag("Pinned")
                         }
                     }
-                    .font(.caption.weight(.medium))
+                    .font(.callout.weight(.medium))
                     Text("\(fmtTurnDuration(activeMs: current.activeMs, idleMs: current.idleMs, wallMs: current.wallMs)) · \(date(current.startMs), format: .dateTime.hour().minute().second())")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
@@ -104,7 +113,7 @@ struct TurnSection: View {
                         subtitle(folder: detail.folder, sessionLabel: detail.sessionLabel, repo: detail.repo)
                         Text("Pinned, aged out of list").foregroundStyle(.secondary)
                     }
-                    .font(.caption.weight(.medium))
+                    .font(.callout.weight(.medium))
                     Text(fmtTurnDuration(activeMs: detail.activeMs, idleMs: detail.idleMs, wallMs: detail.endMs - detail.startMs))
                         .font(.caption2)
                         .foregroundStyle(.secondary)
@@ -115,15 +124,10 @@ struct TurnSection: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
-            Button { step(-1) } label: { Image(systemName: "chevron.right") }
-                .buttonStyle(.plain)
+            Button { step(-1) } label: { Image(systemName: "chevron.right").frame(width: 20, height: 20) }
+                .buttonStyle(.borderless)
                 .disabled(!canStepNewer)
                 .help("Newer turn")
-
-            if let promptId = displayedPromptId {
-                Button("Open in Details") { onOpenTurn(promptId) }
-                    .controlSize(.small)
-            }
         }
         .font(.callout)
     }

@@ -10,7 +10,10 @@ struct DetailWindowView: View {
         Group {
             if let route = model.navigator.stack.last {
                 ScrollView {
-                    routeContent(route).frame(maxWidth: .infinity, alignment: .leading)
+                    routeContent(route)
+                        .frame(maxWidth: 760, alignment: .leading)
+                        .padding(20)
+                        .frame(maxWidth: .infinity)
                 }
                 // A host switch remounts the content, dropping every loaded detail and its tasks.
                 .id(model.selectionGeneration)
@@ -22,16 +25,14 @@ struct DetailWindowView: View {
                 )
             }
         }
-        .padding(14)
         .frame(minWidth: 520, minHeight: 560)
         .navigationTitle(title)
         .toolbar {
             ToolbarItem(placement: .navigation) {
                 if model.navigator.stack.count > 1 {
-                    Button(action: model.navigator.back) {
-                        Image(systemName: "chevron.left")
-                    }
-                    .help("Back")
+                    Button("Back", systemImage: "chevron.left", action: model.navigator.back)
+                        .keyboardShortcut("[")
+                        .help("Back (⌘[)")
                 }
             }
         }

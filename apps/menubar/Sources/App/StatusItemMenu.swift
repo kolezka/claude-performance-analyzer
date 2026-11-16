@@ -1,6 +1,10 @@
 import AppKit
 import SwiftUI
 
+// Short app name for menu items and the About window. The bundle name has no space, and the HIG
+// asks for the same short name (16 characters or fewer) in About, Hide and Quit.
+let appDisplayName = "Claude Telemetry"
+
 // MenuBarExtra has no right-click hook, so catch right clicks aimed at our status bar window
 // and pop a small menu under the icon instead of opening the panel.
 @MainActor
@@ -9,6 +13,8 @@ final class StatusItemMenu: NSObject {
 
     private var monitor: Any?
     private var openSettings: OpenSettingsAction?
+    // Follows the host the panel shows, so the menu opens the same dashboard as the panel button.
+    var dashboardURL: URL?
 
     func install(openSettings: OpenSettingsAction) {
         self.openSettings = openSettings
@@ -20,16 +26,44 @@ final class StatusItemMenu: NSObject {
         }
     }
 
-    private func show(below window: NSWindow) {
+    // Same items and order as a standard App menu: About alone in the first group, then app actions,
+    // then Quit with the app name.
+    func makeMenu() -> NSMenu {
         let menu = NSMenu()
-        let settings = NSMenuItem(title: "Settings…", action: #selector(openSettingsItem), keyEquivalent: ",")
-        settings.target = self
-        menu.addItem(settings)
+        menu.addItem(item("About \(appDisplayName)", #selector(showAbout)))
         menu.addItem(.separator())
-        let quit = NSMenuItem(title: "Quit", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        let dashboard = item("Open Dashboard", #selector(openDashboard), key: "d")
+        // Kept in place but dimmed until the URL is known, so the menu never changes shape.
+        dashboard.isEnabled = dashboardURL != nil
+        menu.addItem(dashboard)
+        menu.addItem(item("Settings…", #selector(openSettingsItem), key: ","))
+        menu.addItem(.separator())
+        let quit = NSMenuItem(title: "Quit \(appDisplayName)", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         menu.addItem(quit)
+        // Items with a target are validated against isEnabled instead of the responder chain.
+        menu.autoenablesItems = false
+        return menu
+    }
+
+    private func item(_ title: String, _ action: Selector, key: String = "") -> NSMenuItem {
+        let item = NSMenuItem(title: title, action: action, keyEquivalent: key)
+        item.target = self
+        return item
+    }
+
+    private func show(below window: NSWindow) {
         // Screen coordinates: the menu's top-left corner goes at the bottom-left of the icon.
-        menu.popUp(positioning: nil, at: NSPoint(x: window.frame.minX, y: window.frame.minY), in: nil)
+        makeMenu().popUp(positioning: nil, at: NSPoint(x: window.frame.minX, y: window.frame.minY), in: nil)
+    }
+
+    @objc private func showAbout() {
+        NSApp.activate(ignoringOtherApps: true)
+        NSApp.orderFrontStandardAboutPanel(options: [.applicationName: appDisplayName])
+    }
+
+    @objc private func openDashboard() {
+        guard let dashboardURL else { return }
+        NSWorkspace.shared.open(dashboardURL)
     }
 
     @objc private func openSettingsItem() {

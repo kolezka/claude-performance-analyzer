@@ -12,19 +12,12 @@ struct HookCallDetailView: View {
     @State private var isLoading = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 18) {
             if let detail {
                 header(detail)
+                if let hint = detail.hint { hintSection(hint) }
                 contextSection(detail)
                 scriptsSection(detail)
-                if let hint = detail.hint { hintSection(hint) }
-                Text("Per-script timing is not captured yet.")
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
-                if let promptId = detail.call.promptId {
-                    Button("Open turn", systemImage: "list.bullet.indent") { onPush(.turn(promptId: promptId)) }
-                        .controlSize(.small)
-                }
             } else if let loadError {
                 EmptyState(
                     title: "Couldn't load hook call",
@@ -35,108 +28,88 @@ struct HookCallDetailView: View {
             } else {
                 DetailSkeleton()
             }
-            refreshBar
+        }
+        .toolbar {
+            if let promptId = detail?.call.promptId {
+                ToolbarItem(placement: .primaryAction) {
+                    Button("Open Turn", systemImage: "list.bullet.indent") { onPush(.turn(promptId: promptId)) }
+                        .help("Show the turn this hook ran in")
+                }
+            }
+            RefreshToolbar(isLoading: isLoading) { Task { await load() } }
         }
         .task(id: "\(model.selectionGeneration)/\(id)") { await load() }
     }
 
-    private var refreshBar: some View {
-        HStack {
-            Spacer()
-            if isLoading { ProgressView().controlSize(.small) }
-            Button("Refresh", systemImage: "arrow.clockwise") { Task { await load() } }
-                .controlSize(.small)
-                .disabled(isLoading)
-        }
-    }
-
-    private func headerText(_ d: HookCallDetail) -> String {
-        var parts = [d.call.ms.map(fmtMs) ?? "Duration not captured"]
-        if let hooks = d.call.hooks {
-            parts.append("\(hooks.success) OK")
-            parts.append("\(hooks.errors) error\(hooks.errors == 1 ? "" : "s")")
-            if hooks.blocking > 0 { parts.append("\(hooks.blocking) blocked") }
-            if hooks.cancelled > 0 { parts.append("\(hooks.cancelled) cancelled") }
-            if hooks.errors > 0 { parts.append("failing script not reported") }
-        }
-        return parts.joined(separator: " · ")
-    }
-
     private func header(_ d: HookCallDetail) -> some View {
-        HStack(alignment: .top, spacing: 8) {
-            Image(systemName: StatsKind.hooks.symbol)
-                .foregroundStyle(d.call.ok ? Color.secondary : Color.red)
-                .frame(width: 18)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(d.name).font(.headline).lineLimit(1).truncationMode(.middle)
-                Text(headerText(d))
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                    .monospacedDigit()
+        VStack(alignment: .leading, spacing: 12) {
+            DetailHeader(
+                symbol: d.call.ok ? StatsKind.hooks.symbol : "xmark.octagon",
+                tint: d.call.ok ? StatsKind.hooks.tint : .red,
+                title: d.name,
+                subtitle: date(d.call.tsMs).formatted(.dateTime.month().day().hour().minute().second())
+            ) {
+                OkBadge(ok: d.call.ok)
             }
-            Spacer()
-            OkBadge(ok: d.call.ok)
+            Card(padding: 12) {
+                HStack(spacing: 8) {
+                    MetricTile(title: "Duration", value: d.call.ms.map(fmtMs) ?? "–")
+                    if let hooks = d.call.hooks {
+                        MetricTile(title: "OK", value: "\(hooks.success)")
+                        MetricTile(title: "Errors", value: "\(hooks.errors)", warn: hooks.errors > 0)
+                        if hooks.blocking > 0 { MetricTile(title: "Blocked", value: "\(hooks.blocking)", warn: true) }
+                        if hooks.cancelled > 0 { MetricTile(title: "Cancelled", value: "\(hooks.cancelled)", warn: true) }
+                    }
+                }
+                if let hooks = d.call.hooks, hooks.errors > 0 {
+                    Text("Telemetry does not say which script failed.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .padding(.top, 6)
+                }
+            }
         }
-    }
-
-    private func contextRow(_ title: String, _ value: String, missing: Bool = false) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 8) {
-            Text(title).foregroundStyle(.secondary).frame(width: 110, alignment: .leading)
-            Text(value)
-                .foregroundStyle(missing ? .tertiary : .primary)
-                .lineLimit(2)
-                .truncationMode(.middle)
-                .textSelection(.enabled)
-        }
-        .font(.caption)
     }
 
     private func contextSection(_ d: HookCallDetail) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            SectionTitle("Context")
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text("Time").foregroundStyle(.secondary).frame(width: 110, alignment: .leading)
-                Text(date(d.call.tsMs), format: .dateTime.month().day().hour().minute().second()).monospacedDigit()
-            }
-            .font(.caption)
-            contextRow("Session kind", d.session.kindLabel ?? "Not captured", missing: d.session.kindLabel == nil)
-            contextRow("Terminal", d.session.terminal ?? "Not captured", missing: d.session.terminal == nil)
-            contextRow("Folder", d.call.folder.map { displayPath($0, hostId: model.selectedHostId) } ?? "Folder not recorded", missing: d.call.folder == nil)
-            contextRow("Branch", d.call.branch ?? "Not captured", missing: d.call.branch == nil)
-            contextRow("Claude Code", d.session.claudeVersion ?? "Not captured", missing: d.session.claudeVersion == nil)
-            if let launcher = d.session.launcher {
-                contextRow("Launched by", launcher)
-            } else {
-                contextRow("Launched by", "Launcher not reported", missing: true)
-                Text("A launcher can tag its runs with OTEL_RESOURCE_ATTRIBUTES=launcher=<name>.")
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
-                    .padding(.leading, 118)
-            }
-            if let sessionId = d.session.sessionId {
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Text("Session ID").foregroundStyle(.secondary).frame(width: 110, alignment: .leading)
-                    Text(sessionId).monospaced().textSelection(.enabled).lineLimit(1).truncationMode(.middle)
-                    Button { copyToPasteboard(sessionId) } label: {
-                        Image(systemName: "doc.on.doc")
+        DetailSection("Context", symbol: "info.circle") {
+            Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 6) {
+                InfoRow("Session kind", d.session.kindLabel ?? "Not captured", missing: d.session.kindLabel == nil)
+                InfoRow("Terminal", d.session.terminal ?? "Not captured", missing: d.session.terminal == nil)
+                InfoRow("Folder", d.call.folder.map { displayPath($0, hostId: model.selectedHostId) } ?? "Folder not recorded",
+                        missing: d.call.folder == nil, mono: d.call.folder != nil)
+                InfoRow("Branch", d.call.branch ?? "Not captured", missing: d.call.branch == nil, mono: d.call.branch != nil)
+                InfoRow("Claude Code", d.session.claudeVersion ?? "Not captured", missing: d.session.claudeVersion == nil)
+                InfoRow(title: "Launched by") {
+                    if let launcher = d.session.launcher {
+                        InfoText(text: launcher)
+                    } else {
+                        VStack(alignment: .leading, spacing: 2) {
+                            InfoText(text: "Launcher not reported", missing: true)
+                            Text("A launcher can tag its runs with OTEL_RESOURCE_ATTRIBUTES=launcher=<name>.")
+                                .font(.caption)
+                                .foregroundStyle(.tertiary)
+                        }
                     }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(.secondary)
-                    .help("Copy session id")
                 }
-                .font(.caption)
-            } else {
-                contextRow("Session ID", "Not captured", missing: true)
+                InfoRow(title: "Session ID") {
+                    if let sessionId = d.session.sessionId {
+                        HStack(spacing: 6) {
+                            InfoText(text: sessionId, mono: true).lineLimit(1)
+                            CopyButton(value: sessionId, help: "Copy session id")
+                        }
+                    } else {
+                        InfoText(text: "Not captured", missing: true)
+                    }
+                }
             }
         }
     }
 
     private func scriptsSection(_ d: HookCallDetail) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(alignment: .firstTextBaseline) {
-                SectionTitle(model.isRemoteSelected ? "Registrations" : "Scripts")
-                Text(model.isRemoteSelected ? "Remote telemetry" : "Current configuration").font(.caption2).foregroundStyle(.tertiary)
-            }
+        DetailSection(title: model.isRemoteSelected ? "Registrations" : "Scripts", symbol: "scroll") {
+            Text(model.isRemoteSelected ? "Remote telemetry" : "Current configuration").font(.caption).foregroundStyle(.tertiary)
+        } content: {
             switch d.candidates.status {
             case "remote":
                 Text("Commands and timeouts are not available from remote telemetry.")
@@ -168,18 +141,16 @@ struct HookCallDetailView: View {
                     .font(.callout)
                     .foregroundStyle(.secondary)
             }
+            Text("Per-script timing is not captured yet.")
+                .font(.caption)
+                .foregroundStyle(.tertiary)
         }
     }
 
     private func scriptRow(_ script: ItemDetail.Definition) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             HStack(spacing: 6) {
-                Text(script.source.capitalized)
-                    .font(.caption2.weight(.semibold))
-                    .padding(.horizontal, 5)
-                    .padding(.vertical, 1)
-                    .background(.secondary.opacity(0.15), in: .capsule)
-                    .foregroundStyle(.secondary)
+                Tag(script.source.capitalized)
                 Text(script.plugin ?? script.summary).font(.callout.weight(.medium)).lineLimit(1)
             }
             if let command = script.command {
@@ -216,12 +187,12 @@ struct HookCallDetailView: View {
 
     private func hintSection(_ hint: String) -> some View {
         VStack(alignment: .leading, spacing: 2) {
-            Text(hint).font(.callout)
+            Label(hint, systemImage: "lightbulb").font(.callout)
             Text("Current configuration").font(.caption2).foregroundStyle(.tertiary)
         }
-        .padding(8)
+        .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.quaternary.opacity(0.3), in: RoundedRectangle(cornerRadius: 6))
+        .background(Color.yellow.opacity(0.12), in: .rect(cornerRadius: 10))
     }
 
     private func load() async {

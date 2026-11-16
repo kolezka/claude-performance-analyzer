@@ -17,7 +17,7 @@ struct ItemDetailView: View {
     @AppStorage(Prefs.Key.hideHeadlessSessions) private var hideHeadlessSessions = Prefs.Defaults.hideHeadlessSessions
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 18) {
             header
             // A failed reload keeps the earlier data on screen, so say it is stale.
             if detail != nil, let loadError {
@@ -39,15 +39,11 @@ struct ItemDetailView: View {
                 }
                 hookCallsSection(detail)
                 hooksSection(detail)
-                DisclosureGroup {
-                    repoSection(detail, title: nil)
-                } label: {
-                    SectionTitle("By repository")
-                }
+                repoSection(detail)
             } else if let detail {
                 statGrid(detail)
                 headlessToggle(detail)
-                repoSection(detail, title: "By repository")
+                repoSection(detail)
                 if let failed = detail.failed, !failed.isEmpty { failedSection(failed) }
                 recentSection(detail)
             } else if let loadError {
@@ -60,50 +56,49 @@ struct ItemDetailView: View {
             } else {
                 DetailSkeleton()
             }
-            refreshBar
         }
+        .toolbar { RefreshToolbar(isLoading: isLoading) { Task { await load() } } }
         .task(id: "\(model.selectionGeneration)/\(kind.rawValue)/\(name)/\(model.minutes)/\(hideHeadlessSessions)/\(selectedPattern ?? "")") { await load() }
     }
 
     private var header: some View {
-        HStack(spacing: 8) {
-            Image(systemName: kind.symbol).foregroundStyle(.secondary).frame(width: 18)
-            Text(name).font(.headline).lineLimit(1).truncationMode(.middle)
-            Spacer()
-            Text(kind.label).font(.caption).foregroundStyle(.secondary)
+        DetailHeader(symbol: kind.symbol, tint: kind.tint, title: name, subtitle: subtitle) {
+            Tag(kind.label, tint: kind.tint)
         }
     }
 
-    private var refreshBar: some View {
-        HStack {
-            Spacer()
-            if isLoading { ProgressView().controlSize(.small) }
-            Button("Refresh", systemImage: "arrow.clockwise") { Task { await load() } }
-                .controlSize(.small)
-                .disabled(isLoading)
-        }
+    private var subtitle: String? {
+        guard let detail else { return nil }
+        return "\(detail.count) call\(detail.count == 1 ? "" : "s") in the last \(Prefs.WindowOption(rawValue: model.minutes)?.label ?? "\(model.minutes)m")"
     }
 
     private func statGrid(_ d: ItemDetail) -> some View {
-        let columns = Array(repeating: GridItem(.flexible(), alignment: .leading), count: 3)
-        return LazyVGrid(columns: columns, alignment: .leading, spacing: 8) {
-            StatCell(title: "Count", value: "\(d.count)")
-            StatCell(title: "Failures", value: "\(d.failures)", warn: d.failures > 0)
-            StatCell(title: "Total", value: fmtMs(d.totalMs))
-            StatCell(title: "p50", value: fmtMs(d.p50))
-            StatCell(title: "p95", value: fmtMs(d.p95))
-            StatCell(title: "Max", value: fmtMs(d.maxMs))
+        Card(padding: 12) {
+            Grid(alignment: .leading, horizontalSpacing: 8, verticalSpacing: 12) {
+                GridRow {
+                    MetricTile(title: "Calls", value: "\(d.count)", size: .title2)
+                    MetricTile(title: "Failures", value: "\(d.failures)", warn: d.failures > 0, size: .title2)
+                    MetricTile(title: "Total", value: fmtMs(d.totalMs), size: .title2)
+                }
+                Divider().gridCellUnsizedAxes(.horizontal)
+                GridRow {
+                    MetricTile(title: "p50", value: fmtMs(d.p50))
+                    MetricTile(title: "p95", value: fmtMs(d.p95))
+                    MetricTile(title: "Max", value: fmtMs(d.maxMs))
+                }
+            }
         }
     }
 
     private func headlessToggle(_ d: ItemDetail) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Toggle("Hide headless SDK sessions", isOn: $hideHeadlessSessions)
-                .toggleStyle(.checkbox)
-                .font(.caption)
+                .toggleStyle(.switch)
+                .controlSize(.small)
+                .font(.callout)
             if let hidden = d.hiddenByHeadless {
                 Text("Hiding \(hidden.calls) call\(hidden.calls == 1 ? "" : "s") (\(hidden.errors) error\(hidden.errors == 1 ? "" : "s")) from headless sessions.")
-                    .font(.caption2)
+                    .font(.caption)
                     .foregroundStyle(hidden.errors > 0 ? Color.orange : Color.secondary)
             } else if let headlessCount = d.headlessCount, headlessCount > 0 {
                 Text(
@@ -111,35 +106,35 @@ struct ItemDetailView: View {
                         ? "\(headlessCount) calls from headless sessions hidden."
                         : "Includes \(headlessCount) calls from headless SDK sessions."
                 )
-                .font(.caption2)
+                .font(.caption)
                 .foregroundStyle(.secondary)
             }
         }
+        .padding(.horizontal, 2)
     }
 
-    private func repoSection(_ d: ItemDetail, title: String?) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            if let title { SectionTitle(title) }
+    private func repoSection(_ d: ItemDetail) -> some View {
+        DetailSection("By repository", symbol: "folder") {
             if d.repos.isEmpty {
                 Text("No repository data.").font(.callout).foregroundStyle(.secondary)
             } else {
                 let maxTotal = max(d.repos.map(\.totalMs).max() ?? 1, 1)
-                ForEach(Array(d.repos.enumerated()), id: \.offset) { _, repo in
-                    VStack(alignment: .leading, spacing: 2) {
+                ForEach(Array(d.repos.enumerated()), id: \.offset) { index, repo in
+                    if index > 0 { Divider() }
+                    VStack(alignment: .leading, spacing: 4) {
                         HStack {
                             Text(repo.label ?? repo.name ?? "Unknown").lineLimit(1).truncationMode(.middle)
                             Spacer(minLength: 8)
                             Text("\(repo.count) · \(fmtMs(repo.totalMs)) · p95 \(fmtMs(repo.p95))")
                                 .foregroundStyle(.secondary)
                         }
-                        .font(.caption)
+                        .font(.callout)
                         .monospacedDigit()
-                        GeometryReader { geo in
-                            RoundedRectangle(cornerRadius: 2)
-                                .fill(Color.blue.opacity(0.5))
-                                .frame(width: geo.size.width * (repo.totalMs / maxTotal))
-                        }
-                        .frame(height: 4)
+                        Capsule()
+                            .fill(kind.tint.opacity(0.55))
+                            .frame(height: 4)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .scaleEffect(x: max(0.02, repo.totalMs / maxTotal), anchor: .leading)
                     }
                     .help(repo.root ?? "Unknown repository")
                 }
@@ -150,14 +145,16 @@ struct ItemDetailView: View {
     private func findingCallout(_ finding: String) -> some View {
         Label(finding, systemImage: "exclamationmark.triangle")
             .font(.callout)
-            .padding(8)
+            .padding(10)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 6))
+            .background(Color.orange.opacity(0.12), in: .rect(cornerRadius: 10))
     }
 
     private func patternsSection(_ patterns: [ItemDetail.Pattern]) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            SectionTitle("Patterns")
+        DetailSection("Patterns", symbol: "line.3.horizontal.decrease.circle") {
+            Text("Calls grouped by how many of their scripts succeeded.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
             ForEach(patterns, id: \.key) { pattern in
                 let selected = selectedPattern == pattern.key
                 Button {
@@ -169,7 +166,7 @@ struct ItemDetailView: View {
                             .font(.caption)
                         Text(pattern.label).foregroundStyle(pattern.errors > 0 ? Color.orange : Color.primary)
                         Spacer(minLength: 8)
-                        Text("\(pattern.count) · p95 \(fmtMs(pattern.p95))").foregroundStyle(.secondary)
+                        Text("\(pattern.count) \(pattern.count == 1 ? "call" : "calls") · p95 \(fmtMs(pattern.p95))").foregroundStyle(.secondary)
                     }
                     .font(.callout)
                     .monospacedDigit()
@@ -191,10 +188,7 @@ struct ItemDetailView: View {
             case .errors: d.failed ?? []
             case .recent: d.recent
             }
-        return VStack(alignment: .leading, spacing: 4) {
-            HStack {
-                SectionTitle("Calls")
-                Spacer()
+        return DetailSection(title: "Calls", symbol: "list.bullet") {
                 Picker("Calls", selection: Binding(get: { current }, set: { callList = $0 })) {
                     if hasSlowest { Text("Slowest").tag(CallList.slowest) }
                     Text("Errors").tag(CallList.errors)
@@ -202,9 +196,9 @@ struct ItemDetailView: View {
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
-                .controlSize(.mini)
+                .controlSize(.small)
                 .fixedSize()
-            }
+        } content: {
             if calls.isEmpty {
                 Text(current == .errors ? "No calls with errors." : "No calls.")
                     .font(.callout)
@@ -221,18 +215,15 @@ struct ItemDetailView: View {
                 HStack(spacing: 6) {
                     Text(date(call.tsMs), format: .dateTime.hour().minute().second())
                         .foregroundStyle(.tertiary)
+                    // Fixed width so the pattern column lines up across rows.
                     Text(call.ms.map(fmtMs) ?? "Not captured")
                         .foregroundStyle(call.ms == nil ? .tertiary : .primary)
+                        .frame(minWidth: 56, alignment: .trailing)
                     if let pattern = call.pattern {
                         Text(pattern).foregroundStyle(call.ok ? Color.secondary : Color.red).lineLimit(1)
                     }
                     if let sessionKind = call.sessionKind {
-                        Text(sessionKind.capitalized)
-                            .font(.caption2.weight(.semibold))
-                            .padding(.horizontal, 5)
-                            .padding(.vertical, 1)
-                            .background(.secondary.opacity(0.15), in: .capsule)
-                            .foregroundStyle(.secondary)
+                        Tag(sessionKind.capitalized)
                             .help(call.launcher.map { "Launched by \($0)" } ?? (call.sessionLabel ?? ""))
                     }
                     Spacer(minLength: 8)
@@ -253,11 +244,9 @@ struct ItemDetailView: View {
     }
 
     private func hooksSection(_ d: ItemDetail) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(alignment: .firstTextBaseline) {
-                SectionTitle("Hooks in this group")
-                Text(model.isRemoteSelected ? "Remote telemetry" : "Current configuration").font(.caption2).foregroundStyle(.tertiary)
-            }
+        DetailSection(title: "Hooks in this group", symbol: "bolt") {
+            Text(model.isRemoteSelected ? "Remote telemetry" : "Current configuration").font(.caption).foregroundStyle(.tertiary)
+        } content: {
             let definitions = d.definitions ?? []
             if definitions.isEmpty {
                 Text("No registered hooks found for this event in these sessions.")
@@ -352,24 +341,17 @@ struct ItemDetailView: View {
     }
 
     private func sourceBadge(_ source: String) -> some View {
-        Text(source.capitalized)
-            .font(.caption2.weight(.semibold))
-            .padding(.horizontal, 5)
-            .padding(.vertical, 1)
-            .background(.secondary.opacity(0.15), in: .capsule)
-            .foregroundStyle(.secondary)
+        Tag(source.capitalized)
     }
 
     private func failedSection(_ failed: [ItemDetail.Recent]) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            SectionTitle("Failed calls")
+        DetailSection("Failed calls", symbol: "xmark.octagon") {
             callRows(failed)
         }
     }
 
     private func recentSection(_ d: ItemDetail) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            SectionTitle("Recent calls")
+        DetailSection("Recent calls", symbol: "clock") {
             if d.recent.isEmpty {
                 Text("No recent calls.").font(.callout).foregroundStyle(.secondary)
             } else {
@@ -381,36 +363,42 @@ struct ItemDetailView: View {
     private func callRows(_ calls: [ItemDetail.Recent]) -> some View {
         ForEach(calls, id: \.id) { call in
             Button { openCall(call) } label: {
-                VStack(alignment: .leading, spacing: 1) {
-                    HStack(spacing: 6) {
-                        Text(date(call.tsMs), format: .dateTime.hour().minute().second())
-                            .foregroundStyle(.tertiary)
-                        if !call.ok {
-                            Image(systemName: "xmark.octagon").foregroundStyle(.red)
-                        }
-                        Text(call.folder.map { displayPath($0, hostId: model.selectedHostId) } ?? "folder unknown")
-                            .monospaced()
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                            .help(call.folder ?? "folder unknown")
-                        if let branch = call.branch {
-                            Label(branch, systemImage: "arrow.triangle.branch")
-                                .labelStyle(.titleOnly)
-                                .foregroundStyle(.tertiary)
+                HStack(alignment: .firstTextBaseline, spacing: 10) {
+                    Text(date(call.tsMs), format: .dateTime.hour().minute().second())
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                        .frame(width: 56, alignment: .leading)
+                    VStack(alignment: .leading, spacing: 2) {
+                        HStack(spacing: 6) {
+                            if !call.ok {
+                                Image(systemName: "xmark.octagon.fill").foregroundStyle(.red)
+                            }
+                            Text(call.detail ?? "Call")
                                 .lineLimit(1)
+                                .truncationMode(.middle)
                         }
-                        Spacer(minLength: 8)
-                        if let detail = call.detail {
-                            Text(detail).lineLimit(1).truncationMode(.middle).foregroundStyle(.secondary)
+                        HStack(spacing: 6) {
+                            Text(call.folder.map { displayPath($0, hostId: model.selectedHostId) } ?? "Folder unknown")
+                                .monospaced(call.folder != nil)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                                .help(call.folder ?? "Folder unknown")
+                            if let branch = call.branch {
+                                Label(branch, systemImage: "arrow.triangle.branch").lineLimit(1)
+                            }
                         }
-                        if let ms = call.ms {
-                            Text(fmtMs(ms)).foregroundStyle(.secondary)
-                        }
+                        .font(.caption)
+                        .foregroundStyle(call.folder == nil ? .tertiary : .secondary)
                     }
-                    .font(.callout)
-                    .monospacedDigit()
+                    Spacer(minLength: 8)
+                    if let ms = call.ms {
+                        Text(fmtMs(ms)).foregroundStyle(.secondary)
+                    }
+                    Image(systemName: "chevron.right").font(.caption2.weight(.semibold)).foregroundStyle(.tertiary)
                 }
+                .padding(.vertical, 2)
+                .font(.callout)
+                .monospacedDigit()
                 .contentShape(.rect)
             }
             .buttonStyle(.plain)

@@ -11,13 +11,17 @@ struct TurnDetailView: View {
     @State private var isLoading = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 18) {
             if let detail {
                 header(detail)
                 if let breakdown = detail.breakdown {
-                    Breakdown(breakdown: Summary.Breakdown(api: breakdown.apiMs, tools: breakdown.toolMs, hooks: breakdown.hookMs))
+                    Card(padding: 12) {
+                        Breakdown(breakdown: Summary.Breakdown(api: breakdown.apiMs, tools: breakdown.toolMs, hooks: breakdown.hookMs))
+                    }
                 }
-                waterfall(detail)
+                DetailSection("Timeline", symbol: "chart.bar.doc.horizontal") {
+                    waterfall(detail)
+                }
             } else if notFound {
                 EmptyState(
                     title: "Turn not found",
@@ -34,57 +38,46 @@ struct TurnDetailView: View {
             } else {
                 DetailSkeleton()
             }
-            refreshBar
         }
+        .toolbar { RefreshToolbar(isLoading: isLoading) { Task { await load() } } }
         .task(id: "\(model.selectionGeneration)/\(promptId)") { await load() }
     }
 
-    private var refreshBar: some View {
-        HStack {
-            Spacer()
-            if isLoading { ProgressView().controlSize(.small) }
-            Button("Refresh", systemImage: "arrow.clockwise") { Task { await load() } }
-                .controlSize(.small)
-                .disabled(isLoading)
-        }
-    }
-
     private func header(_ d: TurnDetail) -> some View {
-        VStack(alignment: .leading, spacing: 3) {
-            if let folder = d.folder {
-                HStack(spacing: 8) {
-                    Text(displayPath(folder, hostId: model.selectedHostId))
-                        .font(.headline)
-                        .monospaced()
+        VStack(alignment: .leading, spacing: 12) {
+            DetailHeader(
+                symbol: "text.bubble",
+                tint: .blue,
+                title: d.folder.map { displayPath($0, hostId: model.selectedHostId) } ?? d.sessionLabel ?? d.repo ?? "Unknown session",
+                subtitle: d.folder != nil ? d.sessionLabel : nil,
+                monospacedTitle: d.folder != nil
+            ) {
+                if let branch = d.branch {
+                    Label(branch, systemImage: "arrow.triangle.branch")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                         .lineLimit(1)
-                        .truncationMode(.middle)
-                    if let branch = d.branch {
-                        Label(branch, systemImage: "arrow.triangle.branch")
-                            .font(.caption)
+                }
+            }
+            .help(d.folder ?? "")
+            Card(padding: 12) {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(spacing: 8) {
+                        MetricTile(title: "Wall", value: fmtMs(d.endMs - d.startMs))
+                        if let active = d.activeMs { MetricTile(title: "Active", value: fmtMs(active)) }
+                        if let idle = d.idleMs { MetricTile(title: "Idle", value: fmtMs(idle)) }
+                        MetricTile(title: "Started", value: date(d.startMs).formatted(.dateTime.hour().minute().second()))
+                    }
+                    if let command = d.command {
+                        Divider()
+                        Text(command)
+                            .font(.callout)
                             .foregroundStyle(.secondary)
+                            .lineLimit(3)
+                            .textSelection(.enabled)
                     }
                 }
-                .help(folder)
-                if let sessionLabel = d.sessionLabel {
-                    Text(sessionLabel).font(.callout).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
-                }
-            } else {
-                Text(d.sessionLabel ?? d.repo ?? "Unknown session")
-                    .font(.headline)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
             }
-            if let command = d.command {
-                Text(command)
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(2)
-                    .textSelection(.enabled)
-            }
-            Text(fmtTurnDuration(activeMs: d.activeMs, idleMs: d.idleMs, wallMs: d.endMs - d.startMs))
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .monospacedDigit()
         }
     }
 

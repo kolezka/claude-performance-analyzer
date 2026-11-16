@@ -15,33 +15,40 @@ struct GeneralSettingsTab: View {
             Section("Startup") {
                 Toggle("Launch at login", isOn: loginItemBinding)
                 if let loginItemError {
-                    Text(loginItemError).font(.caption).foregroundStyle(.red)
+                    ErrorText(loginItemError)
                 }
             }
             Section("Collector") {
                 Toggle("Run bundled collector in the background", isOn: collectorBinding)
                 if collectorStatus == .requiresApproval {
-                    HStack {
-                        Text("Turned off in System Settings.").font(.caption).foregroundStyle(.secondary)
-                        Button("Open Login Items") { SMAppService.openSystemSettingsLoginItems() }
-                            .controlSize(.small)
+                    LabeledContent {
+                        Button("Open Login Items…") { SMAppService.openSystemSettingsLoginItems() }
+                    } label: {
+                        Label("Turned off in System Settings", systemImage: "exclamationmark.triangle.fill")
+                            .foregroundStyle(.orange)
                     }
                 }
                 if let collectorError {
-                    Text(collectorError).font(.caption).foregroundStyle(.red)
+                    ErrorText(collectorError)
                 }
             }
-            Section("Default Time Window") {
+            Section("Time Window") {
                 Picker("Default window", selection: $model.minutes) {
                     ForEach(Prefs.parseEnabledWindows(enabledWindowsRaw)) { option in
                         Text(option.label).tag(option.rawValue)
                     }
                 }
             }
-            Section("Windows Shown in Panel Header") {
+            Section {
                 ForEach(Prefs.WindowOption.allCases) { option in
                     Toggle(option.label, isOn: windowBinding(option))
                 }
+            } header: {
+                Text("Windows in the Panel Header")
+            } footer: {
+                Text("At least one window stays on.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
             }
         }
         .formStyle(.grouped)

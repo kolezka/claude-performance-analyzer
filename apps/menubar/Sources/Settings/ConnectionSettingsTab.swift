@@ -16,13 +16,13 @@ struct ConnectionSettingsTab: View {
         Form {
             Section("Collector") {
                 HStack {
-                    TextField("Collector URL", text: $urlDraft)
+                    TextField("Collector URL", text: $urlDraft, prompt: Text("http://127.0.0.1:4318"))
                         .onSubmit(applyURL)
                     Button("Apply", action: applyURL)
                         .disabled(urlDraft == model.collectorURL.absoluteString)
                 }
                 if let urlError {
-                    Text(urlError).font(.caption).foregroundStyle(.red)
+                    ErrorText(urlError)
                 }
                 HStack(spacing: 8) {
                     Button("Test Connection") { Task { await testConnection() } }
@@ -41,10 +41,10 @@ struct ConnectionSettingsTab: View {
             }
             Section("Requests") {
                 Stepper(value: $model.requestTimeoutSec, in: 1...30) {
-                    Text("Request timeout: \(Int(model.requestTimeoutSec))s")
+                    LabeledContent("Request timeout", value: "\(Int(model.requestTimeoutSec)) s")
                 }
                 Stepper(value: $model.retryDelaySec, in: 1...60) {
-                    Text("Retry delay after failure: \(Int(model.retryDelaySec))s")
+                    LabeledContent("Retry after failure", value: "\(Int(model.retryDelaySec)) s")
                 }
             }
         }

@@ -52,6 +52,8 @@ struct MenuBarLabel: View {
     let status: Status?
     // nil for This Mac.
     var hostName: String?
+    // Handed to the right-click menu so its Open Dashboard item follows the selected host.
+    var dashboardURL: URL?
     @AppStorage(Prefs.Key.labelStyle) private var labelStyleRaw = Prefs.LabelStyle.iconAndValue.rawValue
     @AppStorage(Prefs.Key.labelValue) private var labelValueRaw = Prefs.LabelValue.apiP50.rawValue
     @AppStorage(Prefs.Key.offlineText) private var offlineTextRaw = Prefs.OfflineText.off.rawValue
@@ -80,6 +82,10 @@ struct MenuBarLabel: View {
         }
         .accessibilityLabel(content.accessibility)
         // The label exists from launch, unlike the panel, so it hands the menu its settings opener.
-        .onAppear { StatusItemMenu.shared.install(openSettings: openSettings) }
+        .onAppear {
+            StatusItemMenu.shared.install(openSettings: openSettings)
+            StatusItemMenu.shared.dashboardURL = dashboardURL
+        }
+        .onChange(of: dashboardURL) { _, url in StatusItemMenu.shared.dashboardURL = url }
     }
 }

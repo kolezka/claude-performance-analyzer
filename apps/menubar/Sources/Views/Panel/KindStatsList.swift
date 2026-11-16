@@ -49,57 +49,75 @@ struct KindStatsList: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack {
-                SectionTitle(title)
-                Spacer()
+        VStack(alignment: .leading, spacing: 6) {
+            SectionHeader(title: title) {
                 Picker("Kind", selection: $kind) {
                     ForEach(StatsKind.allCases, id: \.self) { Text($0.label).tag($0) }
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
-                .controlSize(.mini)
+                .controlSize(.small)
                 .fixedSize()
             }
-            VStack(alignment: .leading, spacing: 4) {
-                if rows.isEmpty {
-                    Text("Nothing in this window.").font(.callout).foregroundStyle(.secondary)
-                }
-                // A hook and a tool can share a name, so the kind is part of the key.
-                let ids = rowIds(rows.map { "\($0.0.rawValue)/\($0.1.name)" })
-                ForEach(Array(zip(ids, rows)), id: \.0) { _, item in
-                    let (rowKind, row) = item
-                    Button { onSelect(rowKind, row.name) } label: {
-                        HStack(spacing: 6) {
-                            // Shown for every kind, so rows keep their alignment when the picker changes.
-                            Image(systemName: rowKind.symbol).foregroundStyle(.secondary).frame(width: 16)
-                            Text(row.name).lineLimit(1).truncationMode(.middle)
-                            Spacer(minLength: 8)
-                            if warn(rowKind, row) {
-                                Image(systemName: "exclamationmark.triangle.fill")
-                                    .foregroundStyle(.orange)
-                                    .transition(.scale.combined(with: .opacity))
-                            }
-                            Text(value(row))
-                                .foregroundStyle(.secondary)
-                                .monospacedDigit()
-                                .contentTransition(.numericText())
-                            Image(systemName: "chevron.right")
-                                .font(.caption2)
-                                .foregroundStyle(.tertiary)
-                        }
-                        .contentShape(.rect)
+            .padding(.horizontal, 2)
+            Card(padding: 6) {
+                VStack(alignment: .leading, spacing: 0) {
+                    if rows.isEmpty {
+                        Text("Nothing in this window.")
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                            .padding(6)
                     }
-                    .buttonStyle(.plain)
-                    .font(.callout)
-                    .hoverRow()
-                    .help(row.name)
-                    .transition(.opacity)
+                    // A hook and a tool can share a name, so the kind is part of the key.
+                    let ids = rowIds(rows.map { "\($0.0.rawValue)/\($0.1.name)" })
+                    let maxValue = max(rows.map { metric($0.1) }.max() ?? 1, 1)
+                    ForEach(Array(zip(ids, rows).enumerated()), id: \.element.0) { index, pair in
+                        let (rowKind, row) = pair.1
+                        if index > 0 { Divider().padding(.leading, 34) }
+                        Button { onSelect(rowKind, row.name) } label: {
+                            HStack(spacing: 8) {
+                                // Shown for every kind, so rows keep their alignment when the picker changes.
+                                KindIcon(symbol: rowKind.symbol, tint: rowKind.tint, size: 22)
+                                VStack(alignment: .leading, spacing: 3) {
+                                    HStack(spacing: 6) {
+                                        Text(row.name).lineLimit(1).truncationMode(.middle)
+                                        Spacer(minLength: 8)
+                                        if warn(rowKind, row) {
+                                            Image(systemName: "exclamationmark.triangle.fill")
+                                                .foregroundStyle(.orange)
+                                                .transition(.scale.combined(with: .opacity))
+                                        }
+                                        Text(value(row))
+                                            .foregroundStyle(.secondary)
+                                            .monospacedDigit()
+                                            .contentTransition(.numericText())
+                                    }
+                                    // Share of the top row, so the list reads at a glance.
+                                    Capsule()
+                                        .fill(rowKind.tint.opacity(0.55))
+                                        .frame(height: 3)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                        .scaleEffect(x: max(0.02, metric(row) / maxValue), anchor: .leading)
+                                }
+                                Image(systemName: "chevron.right")
+                                    .font(.caption2.weight(.semibold))
+                                    .foregroundStyle(.tertiary)
+                            }
+                            .padding(.vertical, 5)
+                            .padding(.horizontal, 4)
+                            .contentShape(.rect)
+                        }
+                        .buttonStyle(.plain)
+                        .font(.callout)
+                        .hoverRow()
+                        .help(row.name)
+                        .transition(.opacity)
+                    }
                 }
             }
             .animation(panelAnimation(), value: kind)
             if let footnote {
-                Text(footnote).font(.caption2).foregroundStyle(.tertiary)
+                Text(footnote).font(.caption2).foregroundStyle(.tertiary).padding(.horizontal, 2)
             }
         }
     }

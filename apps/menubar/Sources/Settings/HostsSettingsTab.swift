@@ -41,7 +41,7 @@ struct HostsSettingsTab: View {
                         .disabled(actions.busy || trimmedName.isEmpty || trimmedName.count > 80)
                 }
                 if let actionError = actions.error {
-                    Text(actionError).font(.caption).foregroundStyle(.red)
+                    ErrorText(actionError)
                 }
             } header: {
                 Text("Add a remote host")
@@ -88,7 +88,11 @@ struct HostsSettingsTab: View {
     private var trimmedName: String { newName.trimmingCharacters(in: .whitespacesAndNewlines) }
 
     private func hostRow(_ host: TelemetryHost) -> some View {
-        HStack {
+        HStack(spacing: 10) {
+            Image(systemName: host.isLocal ? "laptopcomputer" : "server.rack")
+                .font(.title3)
+                .foregroundStyle(.secondary)
+                .frame(width: 24)
             VStack(alignment: .leading, spacing: 2) {
                 Text(host.name)
                 Group {
@@ -105,10 +109,18 @@ struct HostsSettingsTab: View {
             }
             Spacer()
             if !host.isLocal {
-                Button("Regenerate Token") { pendingRegenerate = host }
-                    .disabled(actions.busy)
-                Button("Remove", role: .destructive) { pendingRemove = host }
-                    .disabled(actions.busy)
+                Menu {
+                    Button("Regenerate Token…") { pendingRegenerate = host }
+                    Divider()
+                    Button("Remove Host…", role: .destructive) { pendingRemove = host }
+                } label: {
+                    Image(systemName: "ellipsis.circle")
+                }
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .fixedSize()
+                .disabled(actions.busy)
+                .help("Actions for \(host.name)")
             }
         }
     }

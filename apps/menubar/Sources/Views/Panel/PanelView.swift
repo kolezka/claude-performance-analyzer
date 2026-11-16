@@ -9,15 +9,26 @@ struct PanelView: View {
     @AppStorage(Prefs.Key.panelWidth) private var panelWidth = Prefs.Defaults.panelWidth
     @AppStorage(Prefs.Key.showWaterfall) private var showWaterfall = Prefs.Defaults.showSection
     @AppStorage(Prefs.Key.enabledWindows) private var enabledWindowsRaw = Prefs.Defaults.enabledWindowsRaw
+    @AppStorage(Prefs.Key.showKpis) private var showKpis = Prefs.Defaults.showSection
+    @AppStorage(Prefs.Key.showLatencyChart) private var showLatencyChart = Prefs.Defaults.showSection
+    @AppStorage(Prefs.Key.showBreakdown) private var showBreakdown = Prefs.Defaults.showSection
+    @AppStorage(Prefs.Key.showSlowest) private var showSlowest = Prefs.Defaults.showSection
+    @AppStorage(Prefs.Key.showTotalTime) private var showTotalTime = Prefs.Defaults.showSection
+    @AppStorage(Prefs.Key.showLiveFeed) private var showLiveFeed = Prefs.Defaults.showSection
+    @AppStorage(Prefs.Key.panelTab) private var storedTab = PanelTab.overview
     @State private var contentHeight: CGFloat = 0
     @State private var headerHeight: CGFloat = 0
+    @State private var tabBarHeight: CGFloat = 0
     @State private var footerHeight: CGFloat = 0
     @State private var screenHeight: CGFloat?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: 12) {
             PanelHeader(model: model, windows: Prefs.parseEnabledWindows(enabledWindowsRaw))
                 .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { headerHeight = $0 }
+            if showsTabBar {
+                tabBar.onGeometryChange(for: CGFloat.self) { $0.size.height } action: { tabBarHeight = $0 }
+            }
             // A ScrollView has no height of its own here, so it gets the measured content height,
             // capped so the panel never runs past the bottom of the screen.
             ScrollView {
@@ -47,10 +58,44 @@ struct PanelView: View {
     }
 
     // Uses the screen the panel is on. Its visibleFrame already excludes the menu bar and the Dock.
-    // The rest is padding, the three stack gaps, the divider and a small margin under the panel.
+    // The rest is padding, the stack gaps, the divider and a small margin under the panel.
     private var maxContentHeight: CGFloat {
         let available = screenHeightOverride ?? screenHeight ?? NSScreen.main?.visibleFrame.height ?? 800
-        return max(200, available - headerHeight - footerHeight - 28 - 42 - 1 - 16)
+        let tabs = showsTabBar ? tabBarHeight + 12 : 0
+        return max(200, available - headerHeight - tabs - footerHeight - 28 - 36 - 1 - 16)
+    }
+
+    // Tabs whose sections are all switched off in Settings are left out.
+    private var visibleTabs: [PanelTab] {
+        PanelTab.allCases.filter { tab in
+            switch tab {
+            case .overview: showKpis || showLatencyChart || showBreakdown
+            case .top: showSlowest || showTotalTime
+            case .live: showLiveFeed
+            case .turn: showWaterfall
+            }
+        }
+    }
+
+    private var showsTabBar: Bool {
+        visibleTabs.count > 1 && model.status != nil && (model.summary?.eventCount ?? 0) > 0
+    }
+
+    private var tab: PanelTab {
+        visibleTabs.contains(storedTab) ? storedTab : (visibleTabs.first ?? .overview)
+    }
+
+    private var tabBar: some View {
+        Picker("Section", selection: Binding(get: { tab }, set: { new in
+            withAnimation(panelAnimation()) { storedTab = new }
+        })) {
+            ForEach(visibleTabs) { t in
+                Text(t.label).tag(t)
+            }
+        }
+        .pickerStyle(.segmented)
+        .labelsHidden()
+        .frame(maxWidth: .infinity)
     }
 
     @ViewBuilder private var content: some View {
@@ -72,24 +117,26 @@ struct PanelView: View {
                     )
                     .id("empty")
                 } else {
-                    VStack(alignment: .leading, spacing: 14) {
-                        SummaryView(
-                            summary: s,
-                            live: model.live,
-                            running: model.runningHooks.entries,
-                            now: model.clock,
-                            onSelectItem: { kind, name in openDetail(.item(kind: kind, name: name)) },
-                            onSelectEvent: { id in openDetail(.event(id: id)) }
-                        )
-                        if showWaterfall {
+                    Group {
+                        if tab == .turn {
                             TurnSection(
                                 model: model,
                                 onSelectEvent: { id in openDetail(.event(id: id)) },
                                 onOpenTurn: { promptId in openDetail(.turn(promptId: promptId)) }
                             )
+                        } else {
+                            SummaryView(
+                                summary: s,
+                                live: model.live,
+                                running: model.runningHooks.entries,
+                                now: model.clock,
+                                tab: tab,
+                                onSelectItem: { kind, name in openDetail(.item(kind: kind, name: name)) },
+                                onSelectEvent: { id in openDetail(.event(id: id)) }
+                            )
                         }
                     }
-                    .id("summary")
+                    .id("summary-\(tab.rawValue)")
                 }
             } else if let error = model.summaryError {
                 EmptyState(
@@ -114,13 +161,17 @@ struct PanelView: View {
             .keyboardShortcut("d")
             .help("Open the dashboard in your browser (⌘D)")
             Spacer()
-            Button("Settings", systemImage: "gearshape", action: openSettingsWindow)
+            Button("Settings…", systemImage: "gearshape", action: openSettingsWindow)
+                .labelStyle(.iconOnly)
                 .keyboardShortcut(",")
-                .help("Open Settings (⌘,)")
-            Button("Quit") { NSApp.terminate(nil) }
+                .help("Settings… (⌘,)")
+            Button("Quit", systemImage: "power") { NSApp.terminate(nil) }
+                .labelStyle(.iconOnly)
                 .keyboardShortcut("q")
+                .help("Quit \(appDisplayName) (⌘Q)")
         }
         .buttonStyle(.borderless)
+        .controlSize(.large)
     }
 
     private func openSettingsWindow() {

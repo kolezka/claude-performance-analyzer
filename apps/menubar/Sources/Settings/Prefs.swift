@@ -21,6 +21,8 @@ enum Prefs {
         static let showTotalTime = "showTotalTime"
         static let showLiveFeed = "showLiveFeed"
         static let showWaterfall = "showWaterfall"
+        static let panelTab = "panelTab"
+        static let settingsPane = "settingsPane"
         static let hideHeadlessSessions = "hideHeadlessSessions"
         static let rowsPerList = "rowsPerList"
         static let liveFeedLength = "liveFeedLength"
@@ -42,7 +44,7 @@ enum Prefs {
             window, collectorURL, requestTimeoutSec,
             retryDelaySec, enabledWindows, labelStyle, labelValue, offlineText, bounceIconOnSlow,
             panelWidth, showKpis, showLatencyChart, showBreakdown, showSlowest, showTotalTime,
-            showLiveFeed, showWaterfall, hideHeadlessSessions, rowsPerList, liveFeedLength,
+            showLiveFeed, showWaterfall, panelTab, settingsPane, hideHeadlessSessions, rowsPerList, liveFeedLength,
             hideHookStartEvents, hookWarnThresholdMs, animationsMode, runCollector, selectedHostId,
             // Kind pickers inside the panel's two lists, persisted since before Settings existed.
             "slowestKind", "totalTimeKind",
