@@ -62,6 +62,9 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add --force dist/mcp
+          # The installed tree needs only dist/. A root package.json and bun.lock make Claude Code
+          # warn that bun.lock does not list the plugin as its only workspace.
+          git rm --cached --quiet package.json bun.lock
           git commit -m "chore(release): plugin v$VERSION with dist from $GITHUB_SHA"
           git tag "plugin-v$VERSION"
           git push origin "refs/tags/plugin-v$VERSION"
